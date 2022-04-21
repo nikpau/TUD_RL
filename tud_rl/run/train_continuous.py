@@ -109,8 +109,7 @@ def train(c: ConfigFile, agent_name: str):
     elif c.Env.state_type == "feature":
         c.state_shape = env.observation_space.shape[0]
 
-    # mode and action details
-    c.mode = "train"
+    # Action details
     c.num_actions = env.action_space.shape[0]
     c.action_high = env.action_space.high[0]
     c.action_low  = env.action_space.low[0]

@@ -92,7 +92,6 @@ def train(c: ConfigFile, agent_name: str):
         c.state_shape = env.observation_space.shape[0]
 
     # mode and num actions
-    c.mode = "train"
     c.num_actions = env.action_space.n
 
     # seeding
