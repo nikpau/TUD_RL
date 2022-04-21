@@ -3,11 +3,13 @@ Some simple logging functionality, inspired by rllab's logging.
 Logs to a tab-separated-values file (path/to/output_directory/progress.txt)
 """
 import atexit
+from glob import glob
 import json
 import os
 import os.path as osp
 import random
 from datetime import date
+from tud_rl import logger
 
 import numpy as np
 from mpi4py import MPI
@@ -119,33 +121,34 @@ class Logger:
                 hyperparameter configuration with multiple random seeds, you
                 should give them all the same ``exp_name``.)
         """
-        
+       
+        suffix = "experiments" 
+         
         # create output directory
         if output_dir is not None:
-            self.output_dir = output_dir
+            self.output_dir = osp.join(output_dir, suffix)
+            os.makedirs(self.output_dir)
         else:
+            os.makedirs(suffix, exist_ok=True)
 
-            if not osp.exists("experiments"):
-                os.makedirs("experiments")
+        # Get date from today and format to "yyyy-mm-dd_"
+        today = date.today().strftime("%Y-%m-%d-")
 
-            # Get date from today and format to "yyyy-mm-dd_"
-            today = date.today().strftime("%Y-%m-%d_")
+        # Get folder names in experiments folder
+        #random_str = str(time.time())[-3:]
+        random_str = str(random.randint(10000, 99999))
 
-            # Get folder names in experiments folder
-            #random_str = str(time.time())[-3:]
-            random_str = str(random.randint(10000, 99999))
-
-            if env_str is None and info is None:
-                self.output_dir = "experiments/" + alg_str + "_" + today + random_str
-            
-            elif info is None:
-                self.output_dir = "experiments/" + alg_str + "_" + env_str + "_" + today + random_str
-            
-            elif env_str is None:
-                self.output_dir = "experiments/" + alg_str + "_" + info + "_" + today + random_str
-            
-            else:
-                self.output_dir = "experiments/" + alg_str + "_" + env_str + "_" + info + "_" + today + random_str
+        if env_str is None and info is None:
+            self.output_dir = osp.join(suffix,f"{alg_str}-{today}-{random_str}")
+        
+        elif info is None:
+            self.output_dir = osp.join(suffix,f"{alg_str}-{env_str}-{today}-{random_str}")
+        
+        elif env_str is None:
+            self.output_dir = osp.join(suffix,f"{alg_str}-{info}-{today}-{random_str}")
+        
+        else:
+            self.output_dir = osp.join(suffix,f"{alg_str}-{env_str}-{info}-{today}-{random_str}")
 
         os.makedirs(self.output_dir)
 
