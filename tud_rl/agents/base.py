@@ -1,17 +1,52 @@
 import pickle
 from abc import ABC, abstractmethod
-from typing import Tuple, Union
+from typing import Optional, Tuple, TypeVar, Union
 
 import numpy as np
 import torch
+from tud_rl.common.logging_func import EpochLogger
+from tud_rl.common.nets import *
+from tud_rl.common.buffer import *
+from tud_rl.common.exploration import Gaussian_Noise,OU_Noise
 from tud_rl.common.configparser import ConfigFile
 from tud_rl.common.normalizer import Input_Normalizer
 
+Actor = Union[LSTM_Actor,GaussianActor,LSTM_GaussianActor]
+Critic = Union[TQC_Critics,LSTM_Critic,LSTM_Double_Critic]
+Net = Union[
+    MinAtar_BootDQN,MinAtar_CoreNet
+    ,MinAtar_DQN,RecDQN,MLP,Double_MLP
+]
+Noise = Union[Gaussian_Noise,OU_Noise]
+Buffer = Union[
+    UniformReplayBuffer,UniformReplayBuffer_BootDQN,
+    UniformReplayBuffer_LSTM,UniformReplayBufferEnvs,
+    UniformReplayBufferEnvs_BootDQN
+]
 
 class _Agent(ABC):
     """Abstract Base Class for any agent
     defining its strucure.
     """
+    # Name of agent
+    name: str
+
+    # Internal mode of agent ["train","test"]
+    mode: str
+
+    # Input Normalizer
+    inp_normalizer: Optional[Input_Normalizer]
+
+    # Nets for training
+    net: Optional[Net]
+    actor: Optional[Actor]
+    critic: Optional[Critic]
+
+    # Experience replay buffer
+    buffer: Buffer
+
+    # Logger
+    logger: Optional[EpochLogger]
 
     @abstractmethod
     def select_action(self, s: np.ndarray) -> Union[int, np.ndarray]:
