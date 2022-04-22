@@ -18,7 +18,7 @@ class ConfigFile:
     for training with the `tud_rl` package.
 
     """
-
+    mode: str
     seed: int
     timesteps: int
     epoch_length: int
