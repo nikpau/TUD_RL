@@ -19,7 +19,7 @@ class DQNAgent(BaseAgent):
 
         # attributes and hyperparameters
         self.lr              = c.lr
-        self.dqn_weights     = c.dqn_weights
+        self.weights         = c.weights
         self.eps_init        = c.eps_init
         self.eps_final       = c.eps_final
         self.eps_decay_steps = c.eps_decay_steps
@@ -27,7 +27,7 @@ class DQNAgent(BaseAgent):
         self.net_struc       = c.net_struc
 
         # checks
-        assert not (self.mode == "test" and (self.dqn_weights is None)), "Need prior weights in test mode."
+        assert not (self.mode == "test" and (self.weights is None)), "Need prior weights in test mode."
 
         if self.state_type == "image" and self.net_struc is not None:
             raise Exception("For CNN-based nets, the specification of 'net_struc_dqn' should be 'None'.")
@@ -61,8 +61,9 @@ class DQNAgent(BaseAgent):
         self.n_params = self._count_params(self.DQN)
 
         # load prior weights if available
-        if self.dqn_weights is not None:
-            self.DQN.load_state_dict(torch.load(self.dqn_weights, map_location=self.device))
+        if self.weights is not None:
+            for weight in self.weights:
+                self.DQN.load_state_dict(torch.load(weight, map_location=self.device))
 
         # init target net and counter for target update
         self.target_DQN = copy.deepcopy(self.DQN).to(self.device)

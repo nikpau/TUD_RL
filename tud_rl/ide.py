@@ -22,11 +22,11 @@ from tud_rl.configs.discrete_actions import __path__ as discr_path
 # ---------------- User Settings -----------------------------
 # ------------------------------------------------------------
 
-TASK        = "train"        # ["train", "viz"]
-CONFIG_FILE = "example.json" # Your configuration file as `.yaml` or `.json`
-SEED        = None           # Set a seed different to the one specified in your config
-AGENT_NAME  = "RecDQN"       # Agent to train/viz with.
-DQN_WEIGHTS = None           # Path to a weight file for weight initialization
+TASK        = "train"         # ["train", "viz"]
+CONFIG_FILE = "example.json"  # Your configuration file as `.yaml` or `.json`
+SEED        = None            # Set a seed different to the one specified in your config
+AGENT_NAME  = "RecDQN"        # Agent to train/viz with.
+WEIGHTS     = None            # Path to a weight file for weight initialization
 
 # ------------------------------------------------------------
 # ------------------------------------------------------------
@@ -50,8 +50,8 @@ if SEED is not None:
     config.overwrite(seed=SEED)
 
 # consider weights
-if DQN_WEIGHTS is not None:
-    config.overwrite(dqn_weights=DQN_WEIGHTS)
+if WEIGHTS is not None:
+    config.set_weights(WEIGHTS)
 
 # handle maximum episode steps
 config.max_episode_handler()

@@ -219,18 +219,21 @@ def train(c: ConfigFile, agent_name: str):
 def save_weights(agent: _Agent) -> None:
 
     # Save weights for agents that require a single net
-    if not any([word in agent.name for word in ["ACCDDQN", "Ensemble", "MaxMin"]]):
+    if not any([agent.name.startswith(word) for word in ["ACCDDQN", "Ensemble", "MaxMin"]]):
+        suffix = "dqn"
         torch.save(agent.DQN.state_dict(),
-                   f"{agent.logger.output_dir}/{agent.name}_weights.pth")
+                   f"{agent.logger.output_dir}/{agent.name}_weights.{suffix}")
 
     # Save both nets of the ACCDDQN
     if "ACCDDQN" in agent.name:
+        suffix = "accddqn"
         torch.save(agent.DQN_A.state_dict(),
-                   f"{agent.logger.output_dir}/{agent.name}_A_weights.pth")
+                   f"{agent.logger.output_dir}/{agent.name}_A_weights.{suffix}")
         torch.save(agent.DQN_B.state_dict(),
-                   f"{agent.logger.output_dir}/{agent.name}_B_weights.pth")
+                   f"{agent.logger.output_dir}/{agent.name}_B_weights.{suffix}")
 
     if any(w in agent.name for w in ["Ensemble", "MaxMin"]):
+        suffix = "ensemble"
         for idx, net in enumerate(agent.EnsembleDQN):
             torch.save(net.state_dict(),
-                       f"{agent.logger.output_dir}/{agent.name}_weights_{idx}.pth")
+                       f"{agent.logger.output_dir}/{agent.name}_weights_{idx}.{suffix}")

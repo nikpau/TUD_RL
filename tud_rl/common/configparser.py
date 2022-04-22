@@ -1,10 +1,14 @@
+from ctypes import Union
+from glob import glob
+import os.path as _os
 import json
-from typing import Any, Dict
+from typing import Any, Dict, List, Sequence, Tuple
 
 import numpy as np
 import yaml
 from tud_rl import logger
 
+WEIGHT_EXTENSIONS = ["actor","critic","dqn","accddqn","ensemble"]
 
 class ConfigFile:
     """Configuration class for storing the parsed 
@@ -14,8 +18,49 @@ class ConfigFile:
     for training with the `tud_rl` package.
 
     """
+
+    seed: int
+    timesteps: int
+    epoch_length: int
+    eval_episodes: int
+
+    actor_weights: str
+    critic_weights: str
+
+    input_norm: bool
+    input_norm_prior: str
+    gamma: float
+    eps_init: float
+    eps_final: float
+    eps_decay_steps: int
+    tgt_update_freq: int
+    net_struc: Sequence[Tuple[Tuple[str,int],str]]
+    net_struc_actor: Sequence[Tuple[Tuple[str,int],str]]
+    net_struc_critic: Sequence[Tuple[Tuple[str,int],str]]
+    optimizer: str
+    loss: str
+    lr: float
+    lr_actor: float
+    lr_critic: float
+    buffer_length: int
+    grad_rescale: bool
+    grad_clip: bool
+    act_start_step: int
+    upd_start_step: int
+    upd_every: int
+    batch_size: int
+    device: str
+    output_dir: str
+
+
     class Env:
-        pass
+        name: str
+        max_episode_steps: int
+        state_type: str
+        wrappers: List[str]
+        wrapper_kwargs: Dict[Any, Any]
+        env_kwargs: Dict[Any, Any]
+        info: str
 
     class Agent:
         pass
@@ -23,6 +68,7 @@ class ConfigFile:
     def __init__(self, file: str) -> None:
 
         self.file = file
+        self.weights = []
 
         # Load the YAML or JSON file into a dict
         if self.file.lower().endswith(".json"):
@@ -105,3 +151,19 @@ class ConfigFile:
         if self.Env.max_episode_steps == -1:
             self.Env.max_episode_steps = np.inf
             logger.info("Max episode steps set to `Inf`.")
+    
+    def set_weights(self, path: str) -> None:
+
+        if not _os.isdir(path):
+            msg = f"`{path}` is not a valid directory. Aborting."
+            logger.error(msg)
+            raise OSError(msg)
+        
+        # Match all files with weight extensions
+        files = [glob(_os.join(path,f"*.{ext}")) for ext in WEIGHT_EXTENSIONS]
+        files = [item for sublist in files for item in sublist]
+        msg = " ".join([_os.basename(file) for file in files])
+        logger.info(
+            f"Successfully loaded weight file(s): {msg}")
+        
+        self.weights = files

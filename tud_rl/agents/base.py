@@ -1,6 +1,6 @@
 import pickle
 from abc import ABC, abstractmethod
-from typing import Optional, Tuple, TypeVar, Union
+from typing import Optional, Sequence, Tuple, Union
 
 import numpy as np
 import torch
@@ -14,8 +14,8 @@ from tud_rl.common.normalizer import Input_Normalizer
 Actor = Union[LSTM_Actor,GaussianActor,LSTM_GaussianActor]
 Critic = Union[TQC_Critics,LSTM_Critic,LSTM_Double_Critic]
 Net = Union[
-    MinAtar_BootDQN,MinAtar_CoreNet
-    ,MinAtar_DQN,RecDQN,MLP,Double_MLP
+    MinAtar_BootDQN,MinAtar_CoreNet,
+    MinAtar_DQN,RecDQN,MLP,Double_MLP
 ]
 Noise = Union[Gaussian_Noise,OU_Noise]
 Buffer = Union[
@@ -38,7 +38,11 @@ class _Agent(ABC):
     inp_normalizer: Optional[Input_Normalizer]
 
     # Nets for training
-    net: Optional[Net]
+    DQN: Optional[Net]
+    DQN_A: Optional[Net]
+    DQN_B: Optional[Net]
+    EnsembleDQN: Optional[Sequence[Net]]
+
     actor: Optional[Actor]
     critic: Optional[Critic]
 

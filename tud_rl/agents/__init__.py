@@ -5,6 +5,9 @@ from tud_rl import logger
 class AgentNotFoundError(Exception):
     pass
 
+class WeightFileMismatchError(Exception):
+    pass
+
 def validate_agent(agent: str) -> None:
     """Validates an agent_name string passed
     into it. 
@@ -25,3 +28,8 @@ def is_discrete(name: str) -> bool:
 
 def is_continuous(name: str) -> bool:
     return True if name in _CAGENTS else False
+
+def reduce_name(agent_name: str) -> str:
+    if agent_name[-1].islower():
+        return agent_name[:-2]
+    else: return agent_name

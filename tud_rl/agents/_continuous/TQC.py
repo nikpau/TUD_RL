@@ -37,8 +37,9 @@ class TQCAgent(SACAgent):
         self.n_params = self._count_params(self.actor), self._count_params(self.critic)
 
         # load prior weights if available
-        if self.critic_weights is not None:
-            self.critic.load_state_dict(torch.load(self.critic_weights,map_location=self.device))
+        if self.weights is not None:
+            _, critic_weights = self.weights
+            self.critic.load_state_dict(torch.load(critic_weights,map_location=self.device))
 
         # init target net
         self.target_critic = copy.deepcopy(self.critic).to(self.device)

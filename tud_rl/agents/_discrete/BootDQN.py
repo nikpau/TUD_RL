@@ -47,8 +47,9 @@ class BootDQNAgent(DQNAgent):
         self.n_params = self._count_params(self.DQN)
 
         # prior weights
-        if self.dqn_weights is not None:
-            self.DQN.load_state_dict(torch.load(self.dqn_weights, map_location=self.device))
+        if self.weights is not None:
+            for weight in self.weights:
+                self.DQN.load_state_dict(torch.load(weight, map_location=self.device))
 
         # target net and counter for target update
         self.target_DQN = copy.deepcopy(self.DQN).to(self.device)

@@ -38,8 +38,9 @@ class EnsembleDQNAgent(DQNAgent):
         self.n_params = self.N * self._count_params(self.EnsembleDQN[0])
 
         # prior weights
-        if self.dqn_weights is not None:
-            raise NotImplementedError("Prior weights not implemented so far for EnsembleDQN.")
+        if self.weights is not None:
+            for i, weight in enumerate(self.weights):
+                self.EnsembleDQN[i].load_state_dict(torch.load(weight, map_location=self.device))
 
         # target net and counter for target update
         del self.target_DQN

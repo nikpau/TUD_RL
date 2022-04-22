@@ -4,6 +4,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import tud_rl.common.nets as nets
+from tud_rl import logger
 from tud_rl.agents._discrete.DQN import DQNAgent
 from tud_rl.common.configparser import ConfigFile
 
@@ -36,8 +37,18 @@ class ACCDDQNAgent(DQNAgent):
         self.n_params = self._count_params(self.DQN_A)
 
         # prior weights
-        if self.dqn_weights is not None:
-            raise NotImplementedError("Weight loading for AC_CDDQN is not implemented yet.")
+        if self.weights is not None:
+            if len(self.weights) != 2:
+                logger.error(
+                    "Weight file count mismatch. ACCDDQN needs "
+                    f"exactly two weight files. Found {len(self.weights)}"
+                )
+                raise RuntimeError
+            
+            self.DQN_A.load_state_dict(torch.load(self.weights[0], map_location=self.device))
+            self.DQN_B.load_state_dict(torch.load(self.weights[1], map_location=self.device))
+                
+                
 
         #  optimizer
         del self.DQN_optimizer

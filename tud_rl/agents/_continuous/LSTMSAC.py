@@ -23,8 +23,7 @@ class LSTMSACAgent(BaseAgent):
         self.lr_actor         = c.lr_actor
         self.lr_critic        = c.lr_critic
         self.tau              = c.tau
-        self.actor_weights    = c.actor_weights
-        self.critic_weights   = c.critic_weights
+        self.weights          = c.weights
         self.net_struc_actor  = c.net_struc_actor
         self.net_struc_critic = c.net_struc_critic
 
@@ -86,9 +85,10 @@ class LSTMSACAgent(BaseAgent):
         self.n_params = self._count_params(self.actor), self._count_params(self.critic)
 
         # load prior weights if available
-        if self.actor_weights is not None and self.critic_weights is not None:
-            self.actor.load_state_dict(torch.load(self.actor_weights,map_location=self.device))            
-            self.critic.load_state_dict(torch.load(self.critic_weights,map_location=self.device))
+        if self.weights is not None:
+            actor_weights, critic_weights = self.weights
+            self.actor.load_state_dict(torch.load(actor_weights,map_location=self.device))            
+            self.critic.load_state_dict(torch.load(critic_weights,map_location=self.device))
 
         # init target net
         self.target_critic = copy.deepcopy(self.critic).to(self.device)
