@@ -1,6 +1,6 @@
 # RL Dresden Algorithm Suite
 
-This Suite implements several model-free off-policy deep reinforcement learning algorithms for discrete and continuous action spaces in PyTorch.
+This suite implements several model-free off-policy deep reinforcement learning algorithms for discrete and continuous action spaces in PyTorch.
 
 ## Algorithms
 
@@ -66,24 +66,14 @@ The recommended way to train or visualize your environment is to use the `tud_rl
 
 In order to run the package, you have to supply the following flags to the module:
 
-##### -m [--mode=]
+##### -t [--task=]
 
-Training mode can be either `train` or `visualize`. If you want to visulaize your environment you must make sure that training weights are supplied in the config file:
+Execution task can be either `train` or `viz`. 
 
-For discrete training the config entry looks like:
+#### -w [--weights=]
 
-```yaml
----
-dqn_weights: /path/to/weights.pth
-```
+To visualize your environment you must make sure to supply a path to a folder with neural networks in it (this will most likely be a folder inside the `experiments/` directory, which has been created during training).
 
-For continuous training you must supply both actor and critic weights:
-
-```yaml
----
-actor_weights: /path/to/actor_weights.pth
-critic_weights: /path/to/critic_weights.pth
-```
 
 ##### -c [--config_file=]
 
@@ -93,10 +83,16 @@ Name of your configuration file placed in either `/tud_rl/configs/discrete_actio
 
 Name of the agent you want to use for training or visualization. The specified agent must be a present in your configuration file.
 
-#### Example:
+#### Example for training:
 
 ```bash
-$ python -m tud_rl -m train -c myconfig.yaml -a DDQN
+$ python -m tud_rl -t train -c myconfig.yaml -a DDQN
+```
+
+#### Example for visualization:
+
+```bash
+$ python -m tud_rl -t viz -c myconfig.yaml -a DDQN -w path/to/experiment
 ```
 
 ## Gym environment integration
