@@ -183,8 +183,9 @@ class DQNAgent(BaseAgent):
     @torch.no_grad()
     def _target_update(self):
 
+        # increase target-update cnt
+        self.tgt_up_cnt += 1
+
         if self.tgt_up_cnt % self.tgt_update_freq == 0:
             self.target_DQN.load_state_dict(self.DQN.state_dict())
 
-        # increase target-update cnt
-        self.tgt_up_cnt += 1
