@@ -1,0 +1,21 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+gym = "*"
+torch = "==1.9.0"
+pybullet = "*"
+pybulletgym = {editable = true, git = "https://github.com/benelot/pybullet-gym.git"}
+pygame = "*"
+minatar = {git = "https://github.com/kenjyoung/MinAtar.git"}
+mpi4py = "*"
+matplotlib = "*"
+pyyaml = "*"
+ple = {editable = true, git = "https://github.com/ntasfi/PyGame-Learning-Environment"}
+
+[dev-packages]
+
+[requires]
+python_version = "3.9"
