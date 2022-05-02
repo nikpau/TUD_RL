@@ -2,6 +2,8 @@ import logging
 import sys
 import gym
 
+__version__ = "1.0.0"
+
 loc = "tud_rl.envs:"
 
 # ----------- Custom Env Registration --------------------------
