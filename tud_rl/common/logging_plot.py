@@ -4,7 +4,7 @@ import os
 #matplotlib.use("agg")
 import matplotlib.pyplot as plt
 import pandas as pd
-from helper_fnc import exponential_smoothing
+from .helper_fnc import exponential_smoothing
 from collections import namedtuple
 from pathlib import Path
 
