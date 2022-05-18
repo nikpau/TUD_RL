@@ -4,13 +4,13 @@ import os
 #matplotlib.use("agg")
 import matplotlib.pyplot as plt
 import pandas as pd
-from .helper_fnc import exponential_smoothing
+from helper_fnc import exponential_smoothing
 from collections import namedtuple
 from pathlib import Path
 
 # Green, brown
-COLORS = namedtuple("COLORS", ["green","yellow","brown","bluish","Cream"])
-colors = COLORS("#205855","#FF7D00","#6C534E","#8DA9C4", "#EEF4ED")
+COLORS = namedtuple("COLORS", ["green","yellow","brown","bluish","Cream","whiteish"])
+colors = COLORS("#205855","#FF7D00","#6C534E","#8DA9C4", "#EEF4ED","#f8f9fa")
 
 def plot_from_progress(dir, alg, env_str, info=None):
     """Plots based on a given 'progress.txt' the evaluation return, Q_values and losses.
@@ -40,6 +40,12 @@ def plot_from_progress(dir, alg, env_str, info=None):
 
     # create plot
     fig, ax = plt.subplots(2, 2, figsize=(16, 9))
+
+    fig.set_facecolor(colors.whiteish)
+    ax[0,0].set_facecolor(colors.whiteish)
+    ax[0,1].set_facecolor(colors.whiteish)
+    ax[1,0].set_facecolor(colors.whiteish)
+    ax[1,1].set_facecolor(colors.whiteish)
     
     # define title
     if info is not None:
@@ -98,5 +104,7 @@ def plot_from_progress(dir, alg, env_str, info=None):
     logoax.axis('off')
     
     # safe figure and close
-    plt.savefig(f"{dir}/{alg}_{env_str}.pdf")
+    plt.savefig(f"{dir}/{alg}_{env_str}1.pdf")
     plt.close()
+
+plot_from_progress("/home/niklaspaulig/Dropbox/TU Dresden/hpc/experiments/MaxMinDQN_b-PathFollower-v0-downstream-2°-2-6-step-06-02-02-nohist-2022-05-17--33498","MaxMin","MyEnv","Some Info")
