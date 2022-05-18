@@ -106,5 +106,3 @@ def plot_from_progress(dir, alg, env_str, info=None):
     # safe figure and close
     plt.savefig(f"{dir}/{alg}_{env_str}1.pdf")
     plt.close()
-
-plot_from_progress("/home/niklaspaulig/Dropbox/TU Dresden/hpc/experiments/MaxMinDQN_b-PathFollower-v0-downstream-2°-2-6-step-06-02-02-nohist-2022-05-17--33498","MaxMin","MyEnv","Some Info")
