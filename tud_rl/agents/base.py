@@ -24,6 +24,8 @@ Buffer = Union[
     UniformReplayBufferEnvs_BootDQN
 ]
 
+Optimizer = Union[torch.optim.Adam,torch.optim.RMSprop]
+
 class _Agent(ABC):
     """Abstract Base Class for any agent
     defining its strucure.
@@ -48,6 +50,9 @@ class _Agent(ABC):
 
     # Experience replay buffer
     buffer: Buffer
+
+    # Optimizer
+    optimizer: Optimizer
 
     # Logger
     logger: Optional[EpochLogger]
