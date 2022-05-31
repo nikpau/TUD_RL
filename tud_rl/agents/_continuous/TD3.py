@@ -43,7 +43,7 @@ class TD3Agent(DDPGAgent):
             p.requires_grad = False
 
         # define critic optimizer
-        if self.optimizer == "Adam":
+        if self.optimizer_name == "Adam":
             self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=self.lr_critic)
         else:
             self.critic_optimizer = optim.RMSprop(self.critic.parameters(), lr=self.lr_critic, alpha=0.95, centered=True, eps=0.01)

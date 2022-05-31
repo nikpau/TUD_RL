@@ -98,7 +98,7 @@ class SACAgent(BaseAgent):
                 p.requires_grad = False
 
         # define optimizer
-        if self.optimizer == "Adam":
+        if self.optimizer_name == "Adam":
             self.actor_optimizer  = optim.Adam(self.actor.parameters(), lr=self.lr_actor)
             if init_critic:
                 self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=self.lr_critic)
