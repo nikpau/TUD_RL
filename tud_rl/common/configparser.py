@@ -1,7 +1,7 @@
 from glob import glob
 import os.path as _os
 import json
-from typing import Any, Dict, List, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import yaml
@@ -39,6 +39,8 @@ class ConfigFile:
     optimizer: str
     loss: str
     lr: float
+    lr_final: Optional[float]
+    lr_decay_steps: Optional[int]
     lr_actor: float
     lr_critic: float
     buffer_length: int

@@ -4,6 +4,7 @@ from typing import Optional, Sequence, Tuple, Union
 
 import numpy as np
 import torch
+from tud_rl import logger
 from tud_rl.common.logging_func import EpochLogger
 from tud_rl.common.nets import *
 from tud_rl.common.buffer import *
@@ -52,7 +53,8 @@ class _Agent(ABC):
     buffer: Buffer
 
     # Optimizer
-    optimizer: Optimizer
+    optimizer_name: str
+    optimizer: Union[Optimizer,Sequence[Optimizer]]
 
     # Logger
     logger: Optional[EpochLogger]
@@ -108,7 +110,7 @@ class BaseAgent(_Agent):
         self.input_norm       = c.input_norm
         self.input_norm_prior = c.input_norm_prior
         self.gamma            = c.gamma
-        self.optimizer        = c.optimizer
+        self.optimizer_name_name   = c.optimizer
         self.loss             = c.loss
         self.buffer_length    = c.buffer_length
         self.grad_clip        = c.grad_clip
@@ -138,7 +140,7 @@ class BaseAgent(_Agent):
                 raise NotImplementedError("Input normalization is not available for images.")
 
         assert self.loss in ["SmoothL1Loss", "MSELoss"], "Pick 'SmoothL1Loss' or 'MSELoss', please."
-        assert self.optimizer in ["Adam", "RMSprop"], "Pick 'Adam' or 'RMSprop' as optimizer, please."
+        assert self.optimizer_name_name in ["Adam", "RMSprop"], "Pick 'Adam' or 'RMSprop' as optimizer, please."
         assert self.device in ["cpu", "cuda"], "Unknown device."
 
         # gpu support
@@ -146,7 +148,7 @@ class BaseAgent(_Agent):
             self.device = torch.device("cpu")
         else:
             self.device = torch.device("cuda")
-            print("Using GPU support.")
+            logger.info("Using GPU support.")
 
         # input normalizer
         if self.input_norm:

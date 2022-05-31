@@ -35,7 +35,7 @@ class KEBootDQNAgent(BootDQNAgent):
 
         #-------- train DQN --------
         # clear gradients
-        self.DQN_optimizer.zero_grad()
+        self.optimizer.zero_grad()
         
         # current and next Q-values
         Q_main = self.DQN(s)
@@ -106,7 +106,7 @@ class KEBootDQNAgent(BootDQNAgent):
             nn.utils.clip_grad_norm_(self.DQN.parameters(), max_norm=10)
         
         # perform optimizing step
-        self.DQN_optimizer.step()
+        self.optimizer.step()
         
         # log critic training
         self.logger.store(Loss=loss.detach().cpu().numpy().item())

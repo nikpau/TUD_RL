@@ -74,10 +74,10 @@ class DQNAgent(BaseAgent):
             p.requires_grad = False
 
         # define optimizer
-        if self.optimizer == "Adam":
-            self.DQN_optimizer = optim.Adam(self.DQN.parameters(), lr=self.lr)
+        if self.optimizer_name_name == "Adam":
+            self.optimizer_name = optim.Adam(self.DQN.parameters(), lr=self.lr)
         else:
-            self.DQN_optimizer = optim.RMSprop(self.DQN.parameters(), lr=self.lr, alpha=0.95, centered=True, eps=0.01)
+            self.optimizer = optim.RMSprop(self.DQN.parameters(), lr=self.lr, alpha=0.95, centered=True, eps=0.01)
 
     def memorize(self, s, a, r, s2, d):
         """Stores current transition in replay buffer."""
@@ -148,7 +148,7 @@ class DQNAgent(BaseAgent):
 
         # -------- train DQN --------
         # clear gradients
-        self.DQN_optimizer.zero_grad()
+        self.optimizer.zero_grad()
 
         # Q estimates
         Q = self.DQN(s)
@@ -171,7 +171,7 @@ class DQNAgent(BaseAgent):
             nn.utils.clip_grad_norm_(self.DQN.parameters(), max_norm=10)
 
         # perform optimizing step
-        self.DQN_optimizer.step()
+        self.optimizer.step()
 
         # log critic training
         self.logger.store(Loss=loss.detach().cpu().numpy().item())

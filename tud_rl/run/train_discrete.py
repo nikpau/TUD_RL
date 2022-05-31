@@ -1,3 +1,4 @@
+from tud_rl import logger
 import pickle
 import random
 import time
@@ -111,6 +112,22 @@ def train(c: ConfigFile, agent_name: str):
     agent_ = getattr(agents, agent_name_red)  # Get agent class by name
     agent: _Agent = agent_(c, agent_name)  # Instantiate agent
 
+    # Optimizer decay
+    if c.lr_final is not None and c.lr_decay_steps is not None:
+        logger.info(
+            "Adaptive learning rate initialized: "
+            f"lr_init: {'{:.2E}'.format(c.lr)}; "
+            f"lr_final: {'{:.2E}'.format(c.lr_final)}; "
+            f"decay steps: {'{:.2E}'.format(c.lr_decay_steps)}"
+        )
+        if isinstance(agent.optimizer,list):
+            for optimizer in agent.optimizer:
+                optimizer.param_groups[0]["lr"] = c.lr
+        else:
+            agent.optimizer.param_groups[0]["lr"] = c.lr
+        lr_incr = (c.lr_final - c.lr)/c.lr_decay_steps
+        lr = c.lr
+
     # Initialize logging
     agent.logger = EpochLogger(alg_str    = agent.name,
                                env_str    = c.Env.name,
@@ -119,6 +136,7 @@ def train(c: ConfigFile, agent_name: str):
 
     agent.logger.save_config({"agent_name": agent.name, **c.config_dict})
     agent.print_params(agent.n_params, case=0)
+
 
     # get initial state and normalize it
     s = env.reset()
@@ -160,6 +178,12 @@ def train(c: ConfigFile, agent_name: str):
         if (total_steps >= c.upd_start_step) and (total_steps % c.upd_every == 0):
             for _ in range(c.upd_every):
                 agent.train()
+                lr += lr_incr
+                if isinstance(agent.optimizer,list):
+                    for optimizer in agent.optimizer:
+                        optimizer.param_groups[0]["lr"] = min(lr,c.lr_final)
+                else:
+                    agent.optimizer.param_groups[0]["lr"] = min(lr,c.lr_final)
 
         # s becomes s2
         s = s2

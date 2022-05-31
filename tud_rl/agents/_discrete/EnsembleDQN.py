@@ -52,16 +52,14 @@ class EnsembleDQNAgent(DQNAgent):
             for p in net.parameters():
                 p.requires_grad = False
 
-        # define optimizer
-        del self.DQN_optimizer
-        self.EnsembleDQN_optimizer = [None] * self.N
+        self.optimizer = [None] * self.N
 
         for i in range(self.N):
-            if self.optimizer == "Adam":
-                self.EnsembleDQN_optimizer[i] = optim.Adam(self.EnsembleDQN[i].parameters(), lr=self.lr)
+            if self.optimizer_name == "Adam":
+                self.optimizer[i] = optim.Adam(self.EnsembleDQN[i].parameters(), lr=self.lr)
 
             else:
-                self.EnsembleDQN_optimizer[i] = optim.RMSprop(self.EnsembleDQN[i].parameters(), lr=self.lr, alpha=0.95, centered=True, eps=0.01)
+                self.optimizer[i] = optim.RMSprop(self.EnsembleDQN[i].parameters(), lr=self.lr, alpha=0.95, centered=True, eps=0.01)
 
 
     def _ensemble_reduction(self, q_ens):
@@ -132,7 +130,7 @@ class EnsembleDQNAgent(DQNAgent):
             s, a, r, s2, d = batch
 
             # clear gradients
-            self.EnsembleDQN_optimizer[i].zero_grad()
+            self.optimizer[i].zero_grad()
             
             # Q estimates
             Q = self.EnsembleDQN[i](s)
@@ -155,7 +153,7 @@ class EnsembleDQNAgent(DQNAgent):
                 nn.utils.clip_grad_norm_(self.EnsembleDQN[i].parameters(), max_norm=10)
             
             # perform optimizing step
-            self.EnsembleDQN_optimizer[i].step()
+            self.optimizer[i].step()
             
             # log critic training
             self.logger.store(Loss=loss.detach().cpu().numpy().item())

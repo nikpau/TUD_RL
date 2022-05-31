@@ -51,9 +51,9 @@ class ACCDDQNAgent(DQNAgent):
                 
 
         #  optimizer
-        del self.DQN_optimizer
+        del self.optimizer
 
-        if self.optimizer == "Adam":
+        if self.optimizer_name == "Adam":
             self.DQN_A_optimizer = optim.Adam(self.DQN_A.parameters(), lr=self.lr)
             self.DQN_B_optimizer = optim.Adam(self.DQN_B.parameters(), lr=self.lr)
         else:
