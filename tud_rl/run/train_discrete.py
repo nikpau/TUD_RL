@@ -114,6 +114,7 @@ def train(c: ConfigFile, agent_name: str):
 
     # Optimizer decay
     if c.lr_final is not None and c.lr_decay_steps is not None:
+        decayed_lr = True
         logger.info(
             "Adaptive learning rate initialized: "
             f"lr_init: {'{:.2E}'.format(c.lr)}; "
@@ -178,12 +179,13 @@ def train(c: ConfigFile, agent_name: str):
         if (total_steps >= c.upd_start_step) and (total_steps % c.upd_every == 0):
             for _ in range(c.upd_every):
                 agent.train()
-                lr += lr_incr
-                if isinstance(agent.optimizer,list):
-                    for optimizer in agent.optimizer:
-                        optimizer.param_groups[0]["lr"] = min(lr,c.lr_final)
-                else:
-                    agent.optimizer.param_groups[0]["lr"] = min(lr,c.lr_final)
+                if decayed_lr:
+                    lr += lr_incr
+                    if isinstance(agent.optimizer,list):
+                        for optimizer in agent.optimizer:
+                            optimizer.param_groups[0]["lr"] = min(lr,c.lr_final)
+                    else:
+                        agent.optimizer.param_groups[0]["lr"] = min(lr,c.lr_final)
 
         # s becomes s2
         s = s2
