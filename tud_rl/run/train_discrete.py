@@ -113,6 +113,7 @@ def train(c: ConfigFile, agent_name: str):
     agent: _Agent = agent_(c, agent_name)  # Instantiate agent
 
     # Optimizer decay
+    decayed_lr = False
     if c.lr_final is not None and c.lr_decay_steps is not None:
         decayed_lr = True
         logger.info(
