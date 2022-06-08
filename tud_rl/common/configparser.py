@@ -163,7 +163,7 @@ class ConfigFile:
         # Match all files with weight extensions
         files = [glob(_os.join(path,f"*.{ext}")) for ext in WEIGHT_EXTENSIONS]
         files = [item for sublist in files for item in sublist]
-        msg = "\n".join([_os.basename(file) for file in files])
+        msg = "\n\t".join([_os.basename(file) for file in files])
         logger.info(
             f"Successfully loaded weight file(s): {msg}")
         
