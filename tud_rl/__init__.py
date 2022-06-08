@@ -1,6 +1,7 @@
 import logging
 import sys
 import gym
+from .common.formatter import ColoredFormatter
 
 __version__ = "1.0.0"
 
@@ -42,7 +43,7 @@ gym.register(
 # Initialize logger
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
-formatter = logging.Formatter('[%(levelname)s] - %(message)s')
+formatter = ColoredFormatter()
 ch = logging.StreamHandler(sys.stdout)
 ch.setFormatter(formatter)
 logger.addHandler(ch)
