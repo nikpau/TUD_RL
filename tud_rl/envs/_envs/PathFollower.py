@@ -725,9 +725,9 @@ class PathFollower(gym.Env):
             course = PI + angle
         elif x2 >= x1 and y2 > y1:
             course = angle
-        elif x2 < x1 and y2 > y1:
+        elif x2 <= x1 and y2 > y1:
             course = TWOPI - angle
-        elif x2 > x1 and y2 < y1:
+        elif x2 >= x1 and y2 < y1:
             course = PI - angle
 
         course = course if self.DIR == 1 else course + PI
