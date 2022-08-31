@@ -37,6 +37,7 @@ class ConfigFile:
     net_struc_actor: Sequence[Tuple[Tuple[str,int],str]]
     net_struc_critic: Sequence[Tuple[Tuple[str,int],str]]
     optimizer: str
+    ppo_continuous: bool
     loss: str
     lr: float
     lr_final: Optional[float]
@@ -129,22 +130,17 @@ class ConfigFile:
                 setattr(self.Agent, key_sub, val)
 
     def overwrite(self, **kwargs) -> None:
-
         for key, val in kwargs.items():
-
             if hasattr(self, key):
-
                 # overwrite config_dict for logging
                 self.config_dict[key] = val
-
                 # set attribute for easy access
                 setattr(self, key, val)
-
             else:
                 logger.error(
                     f"Overwrite: `{type(self).__name__}` has "
                     f"no attribute `{key}`. "
-                    "Skipping..."
+                    "Aborting..."
                 )
                 raise AttributeError
 
