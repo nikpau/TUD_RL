@@ -20,7 +20,6 @@ from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from matplotlib.figure import Figure
 from matplotlib.patches import Patch, Rectangle
 from mmgdynamics.structs import RudderAngle, Surge, Sway, YawRate
-from numpy.typing import ArrayLike
 
 try:
     from mmgdynamics.calibrated_vessels import SPTRR1
@@ -37,7 +36,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple, TypeVar, Union
 
 PI = math.pi
 TWOPI = 2*PI
-TRAIN_ON_TAURUS: bool = False
+TRAIN_ON_TAURUS: bool = True
 rg.options.VERBOSE = False
 
 if TRAIN_ON_TAURUS:
@@ -49,7 +48,6 @@ else:
     matplotlib.use("TKAgg")
 
 # Scenario directory
-SCENARIO_DIR = os.path.abspath(f"/{PREFIX}/{getuser()}/Dropbox/TU Dresden/riverdata/scenes")
 TRAIN = True
 
 # Types
@@ -62,7 +60,7 @@ class PathFollower(gym.Env):
         super().__init__()
 
         assert direction in [-1,1], "Invalid direction"
-        assert mode in ["step","abs"]
+        assert mode in ["step","cont"]
         self.DIR = direction
         self.mode = mode
 
@@ -87,7 +85,7 @@ class PathFollower(gym.Env):
         self.RUDDER_INCR = to_rad(RUDDER_INCR)
         
         # Maximum possible rudder angle [deg]
-        MAX_RUDDER: int = 8
+        MAX_RUDDER: int = 20
         self.MAX_RUDDER = to_rad(MAX_RUDDER)
 
         # Minimum water under keel [m]
@@ -115,7 +113,7 @@ class PathFollower(gym.Env):
         self.delta = 0.0
 
         # Propeller revolutions [s⁻¹]
-        self.nps = 8.0 if self.DIR == -1 else 6.0
+        self.nps = 6.0 if self.DIR == -1 else 5.0
 
         # Overall vessel speed [m/s]
         self.speed = 0
@@ -147,13 +145,19 @@ class PathFollower(gym.Env):
         self.observation_space = spaces.Box(
             low=-np.inf,
             high=np.inf,
-            shape=(9,),
+            shape=(14,),
             dtype=float
         )
 
         # Set action space according to mode
-        self.n_actions = 9 if self.mode == "abs" else 3
-        self.action_space = spaces.Discrete(self.n_actions)
+        self.n_actions = 3 if self.mode == "step" else 1
+        if self.mode == "step":
+            self.action_space = spaces.Discrete(self.n_actions)
+        else:
+            self.action_space = spaces.Box(
+                low=np.array([-1.]),
+                high=np.array([1.])
+            )
 
         self.max_episode_steps = epi_steps
 
@@ -244,7 +248,7 @@ class PathFollower(gym.Env):
         if TRAIN:
             if self.RIVERPATH is not None:
                 delete_river(self.RIVERPATH)
-            self.RIVERPATH = random_river(10,1,1.5)
+            self.RIVERPATH = random_river(20,1,1.5)
             self.set_arrs(*import_river(os.path.abspath(f"./{self.RIVERPATH}")))
 
         def start_x(x): return self.path["x"][x]
@@ -281,7 +285,7 @@ class PathFollower(gym.Env):
         #self.waypoint_idx = 4600
 
         #Test for Scenario
-        self.waypoint_idx = 20
+        self.waypoint_idx = 100
         #self.waypoint_idx = 400
 
         # Get the index of waypoint behind agent
@@ -298,15 +302,15 @@ class PathFollower(gym.Env):
         )        
 
         # Set agent heading to path heading plus some small noise (5° = 1/36*pi rad)
-        random_angle = 2/36*PI
+        #random_angle = 2/36*PI
         self._aghead = self.path_angle(
             p1=(start_x(self.waypoint_idx),
                 start_y(self.waypoint_idx)
             ),
-            p2=(start_x(self.waypoint_idx+3),
-                start_y(self.waypoint_idx+3)
+            p2=(start_x(self.waypoint_idx+1),
+                start_y(self.waypoint_idx+1)
             )
-        ) + random_angle
+        )# + random_angle
 
         # Drift angle == 0 -> movement heading is same as agent heading
         self._movement_heading = self.aghead
@@ -448,8 +452,12 @@ class PathFollower(gym.Env):
             
             # Commanded rudder angle
             self._cra = float(action*self.RUDDER_INCR)
-            return float(action*self.RUDDER_INCR)
+            if action <=0:
+                return max(self.delta-self.cra,-self.MAX_RUDDER)
+            else:
+                return min(self.delta+self.scr,self.MAX_RUDDER)
 
+        # Test Range
         if self.cra > self.delta:
             return min(
                 self.delta + self.RUDDER_INCR,
@@ -490,9 +498,9 @@ class PathFollower(gym.Env):
         k_head = 10
         r_ang = math.exp(-k_head * abs(self.heading_error))
 
-        weights = [0.5,0.1,0.4]
+        weights = [0.6,0.4,0.0]
 
-        return weights[0]*r_cte + weights[1]*r_ang + weights[2]*deriv + border
+        return weights[0]*r_cte + weights[1]*r_ang + weights[2]*r_rot + border
 
     def construct_path(self) -> Dict[str,List[float]]:
         """Generate the path for the vessel to follow.
@@ -637,10 +645,10 @@ class PathFollower(gym.Env):
             state = np.hstack(
                 [
                     self.ivs.u, self.ivs.v, self.ivs.r, self.ivs.delta,
-                    np.zeros(1),
-                    math.tanh(self.T*self.cte),
-                    self.heading_error,
-                    self.wd - self.vessel.d,
+                    np.zeros(4),
+                    math.tanh(self.T*self.cte), np.zeros(1),
+                    self.heading_error,np.zeros(1),
+                    (self.wd - self.vessel.d)/np.max(self._wdarray),
                     self.rel_current_attack_angle
                 ]
             )
@@ -648,11 +656,10 @@ class PathFollower(gym.Env):
             state = np.hstack(
                 [
                     self.ivs.u, self.ivs.v, self.ivs.r, self.ivs.delta,
-                    #np.hstack(self.history.ivs[-10:]),
-                    self.history.delta[-2],
-                    math.tanh(self.T*self.cte),
-                    self.heading_error,
-                    self.wd - self.vessel.d,
+                    self.history.u[-2],self.history.v[-2],self.history.u[-2],self.history.delta[-2],
+                    math.tanh(self.T*self.cte),math.tanh(self.T*self.history.cte[-2]),
+                    self.heading_error,self.history.heading_error[-2],
+                    (self.wd - self.vessel.d)/np.max(self._wdarray),
                     self.rel_current_attack_angle
                 ]
             )
@@ -990,7 +997,7 @@ class PathFollower(gym.Env):
         """
 
         #width = 20
-        width = 2
+        width = 10
 
         start_idx = self.path["idx"][self.red_path["idx"][self.lwp_idx]]
         search_range = np.arange(start_idx-width, start_idx+width+1)
@@ -1483,7 +1490,7 @@ class PathFollower(gym.Env):
     
     # Dynamic setter for extracted river data ----------------------------
 
-    def set_arrs(self, coords: ArrayLike, metrics: ArrayLike) -> None:
+    def set_arrs(self, coords: np.ndarray, metrics: np.ndarray) -> None:
         """Set the arrays of coordinates and metrics.
 
         Args:
@@ -1638,8 +1645,10 @@ if __name__ == "__main__":
     s = p.reset()
     for i in range(1000):
         p.pid_step()
-        p.render()
-        
+        if i == 999:
+            p.render()
+            break
+
     SAVE = False
     if SAVE:
         path = "trajectory_plots/"
