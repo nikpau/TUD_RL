@@ -1,5 +1,4 @@
 import copy
-from turtle import forward
 
 import numpy as np
 import torch
@@ -9,7 +8,6 @@ from torch.distributions.normal import Normal
 
 ACTIVATIONS = {"relu"     : F.relu,
                "identity" : nn.Identity(),
-               "softmax"  : F.softmax,
                "tanh"     : torch.tanh}
 
 
@@ -707,51 +705,3 @@ class RecDQN(nn.Module):
         x = self.post_comb_dense2(x)
 
         return x
-
-# -------------------------- PPO --------------------------------------------------
-class PPOActor(nn.Module):
-    def __init__(self, state_dim, action_dim, continuous: bool = False) -> None:
-        super().__init__()
-
-        self.continuous = continuous
-
-        if continuous:
-            self.actor = nn.Sequential(
-                nn.Linear(state_dim, 64),
-                nn.Tanh(),
-                nn.Linear(64, 64),
-                nn.Tanh(),
-                nn.Linear(64, action_dim),
-                nn.Softmax(dim=-1)
-            )
-        else:
-            self.actor = nn.Sequential(
-                nn.Linear(state_dim, 64),
-                nn.Tanh(),
-                nn.Linear(64, 64),
-                nn.Tanh(),
-                nn.Linear(64, action_dim),
-            )
-
-    def forward(self,x):
-        return self.actor(x)
-
-class PPOCritic(nn.Module):
-    def __init__(self, state_dim) -> None:
-        super().__init__()
-
-        self.critic = nn.Sequential(
-            nn.Linear(state_dim, 64),
-            nn.Tanh(),
-            nn.Linear(64, 64),
-            nn.Tanh(),
-            nn.Linear(64, 1)
-        )
-        
-    def forward(self, x):
-        return self.critic(x)
-
-class PPONetwork:
-    def __init__(self, actor: PPOActor, critic: PPOCritic) -> None:
-        self.actor = actor
-        self.critic = critic

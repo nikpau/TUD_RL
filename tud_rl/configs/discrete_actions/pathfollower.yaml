@@ -1,15 +1,14 @@
 ---
 env:
   name: PathFollower-v0
-  max_episode_steps: 1000
+  max_episode_steps: 2000
   state_type: feature
   wrappers: []
   wrapper_kwargs: {}
   env_kwargs:
-    epi_steps: 1000
-    direction: 1
-    mode: step
-  info: downstream-2°-2-6-steptest
+    mode: abs
+    epi_steps: 2000
+  info: upstream-halfstrvel-2°-3-3
 agent:
   DQN: {}
   DDQN: {}
@@ -29,7 +28,7 @@ agent:
     N: 5
     N_to_update: 1
   MaxMinDQN_a:
-    N: 3
+    N: 2
     N_to_update: 1
   MaxMinDQN_b:
     N: 5
@@ -37,35 +36,33 @@ agent:
   ComboDQN: {}
 img_height: 120
 img_width: 120
-seed: 5702
-timesteps: 3_000_000
+seed: 26757
+timesteps: 10_000_000
 epoch_length: 5000
-eval_episodes: 1
+eval_episodes: 5
 dqn_weights:
 input_norm: false
 input_norm_prior:
-gamma: 0.993
+gamma: 0.99
 eps_init: 1
 eps_final: 0.1
-eps_decay_steps: 1_000_000
+eps_decay_steps: 2_000_000
 tgt_update_freq: 1000
 net_struc:
-  - - 256
+  - - 512
     - relu
   - - 256
     - relu
   - identity
 optimizer: Adam
 loss: MSELoss
-lr: 0.0005
-lr_final: 0.00005
-lr_decay_steps: 1_000_000
+lr: 0.001
 buffer_length: 500_000
-grad_rescale: false
-grad_clip: false
+grad_rescale: true
+grad_clip: true
 act_start_step: 1000
 upd_start_step: 1000
 upd_every: 1
-batch_size: 64
+batch_size: 128
 device: cpu
 output_dir:

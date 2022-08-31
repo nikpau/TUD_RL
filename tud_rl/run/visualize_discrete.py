@@ -1,5 +1,4 @@
 import argparse
-import json
 import random
 import gym
 import gym_minatar
@@ -14,14 +13,13 @@ from tud_rl.common.configparser import ConfigFile
 from tud_rl.wrappers import get_wrapper
 from tud_rl.configs.discrete_actions import __path__ as c_path
 
-PLOT = True
 
 def visualize_policy(env: gym.Env, agent: _Agent, c: ConfigFile):
 
     for _ in range(c.eval_episodes):
 
         # get initial state
-        s = env.reset(seed=c.seed)
+        s = env.reset()
 
         # potentially normalize it
         if c.input_norm:
@@ -37,7 +35,6 @@ def visualize_policy(env: gym.Env, agent: _Agent, c: ConfigFile):
 
             # render env
             env.render()
-            #print(eval_epi_steps)
 
             # select action
             a = agent.select_action(s)
@@ -55,26 +52,6 @@ def visualize_policy(env: gym.Env, agent: _Agent, c: ConfigFile):
 
             # break option
             if eval_epi_steps == c.Env.max_episode_steps:
-                if PLOT:
-                    path = "trajectory_plots/"
-                    with open(path + "cte", "w") as file:
-                        file.write(json.dumps(list(env.history.cte)))
-                    
-                    with open(path + "heading_error", "w") as file:
-                        file.write(json.dumps(list(env.history.heading_error)))
-                    
-                    with open(path + "rudder_movement", "w") as file:
-                        file.write(json.dumps(list(env.history.delta)))
-                    
-                    with open(path + "cross_curr", "w") as file:
-                        file.write(json.dumps(list(env.history.cross_curr_angle)))
-
-                    with open(path + "yaw_accel", "w") as file:
-                        file.write(json.dumps(list(env.history.r)))
-                    
-                    with open(path + "reward", "w") as file:
-                        file.write(json.dumps(list(env.history.reward)))
-                    
                 break
 
         print(cur_ret)
@@ -106,7 +83,7 @@ def test(c: ConfigFile, agent_name: str):
     c.num_actions = env.action_space.n
 
     # seeding
-    #env.seed(c.seed)
+    env.seed(c.seed)
     torch.manual_seed(c.seed)
     np.random.seed(c.seed)
     random.seed(c.seed)

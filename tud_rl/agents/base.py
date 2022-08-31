@@ -50,7 +50,7 @@ class _Agent(ABC):
     critic: Optional[Critic]
 
     # Experience replay buffer
-    buffer: Optional[Buffer]
+    buffer: Buffer
 
     # Optimizer
     optimizer_name: str
@@ -110,7 +110,7 @@ class BaseAgent(_Agent):
         self.input_norm       = c.input_norm
         self.input_norm_prior = c.input_norm_prior
         self.gamma            = c.gamma
-        self.optimizer_name   = c.optimizer
+        self.optimizer_name_name   = c.optimizer
         self.loss             = c.loss
         self.buffer_length    = c.buffer_length
         self.grad_clip        = c.grad_clip

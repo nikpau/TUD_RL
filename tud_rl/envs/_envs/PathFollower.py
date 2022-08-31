@@ -152,7 +152,7 @@ class PathFollower(gym.Env):
         )
 
         # Set action space according to mode
-        self.n_actions = 3 if self.mode == "step" else 1
+        self.n_actions = 9 if self.mode == "abs" else 3
         self.action_space = spaces.Discrete(self.n_actions)
 
         self.max_episode_steps = epi_steps
@@ -281,7 +281,7 @@ class PathFollower(gym.Env):
         #self.waypoint_idx = 4600
 
         #Test for Scenario
-        self.waypoint_idx = 100
+        self.waypoint_idx = 20
         #self.waypoint_idx = 400
 
         # Get the index of waypoint behind agent
@@ -490,7 +490,7 @@ class PathFollower(gym.Env):
         k_head = 10
         r_ang = math.exp(-k_head * abs(self.heading_error))
 
-        weights = [0.6,0.3,0.1]
+        weights = [0.5,0.1,0.4]
 
         return weights[0]*r_cte + weights[1]*r_ang + weights[2]*deriv + border
 
@@ -648,6 +648,7 @@ class PathFollower(gym.Env):
             state = np.hstack(
                 [
                     self.ivs.u, self.ivs.v, self.ivs.r, self.ivs.delta,
+                    #np.hstack(self.history.ivs[-10:]),
                     self.history.delta[-2],
                     math.tanh(self.T*self.cte),
                     self.heading_error,
@@ -989,7 +990,7 @@ class PathFollower(gym.Env):
         """
 
         #width = 20
-        width = 5
+        width = 2
 
         start_idx = self.path["idx"][self.red_path["idx"][self.lwp_idx]]
         search_range = np.arange(start_idx-width, start_idx+width+1)
@@ -1061,7 +1062,8 @@ class PathFollower(gym.Env):
             # self.ax.contourf(self.rx_frame, self.ry_frame,
             #                  self.wd_frame, cmap=cm.ocean)
             # self.ax.quiver(self.rx_frame[::2, ::2], self.ry_frame[::2, ::2],
-            #                self.str_diry_frame[::2,::2], self.str_dirx_frame[::2, ::2],
+            #                self.str_diry_frame[::2,
+            #                                    ::2], self.str_dirx_frame[::2, ::2],
             #                scale=200, headwidth=2)
             self.ax.contourf(self.rx, self.ry,
                              self._wdarray, cmap=cm.ocean, 

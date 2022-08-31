@@ -31,18 +31,6 @@ WEIGHTS     = None            # Path to a weight file for weight initialization
 # ------------------------------------------------------------
 # ------------------------------------------------------------
 
-TASK        = "viz"
-CONFIG_FILE = "pathfollower.yaml"
-SEED        = 9
-#AGENT_NAME  = "SCDQN_b"
-AGENT_NAME  = "MaxMinDQN_a"
-WEIGHTS = None
-#WEIGHTS ="/home/niklaspaulig/Dropbox/TU Dresden/hpc/complete/MaxMinDQN_a-PathFollower-v0-downstream-2°-2-6-step-04-02-04-deriv-eps001-2022-06-01--56261"
-#WEIGHTS ="/home/neural/Dropbox/TU Dresden/hpc/complete/MaxMinDQN_a-PathFollower-v0-downstream-2°-2-6-step-05-01-04-deriv-hw-2022-06-07--25086"
-#WEIGHTS = "/home/niklaspaulig/Dropbox/TU Dresden/hpc/experiments/MaxMinDQN_a-PathFollower-v0-upstream-2°-2-6-step-05-01-04-deriv-hw-2022-06-14--25086"
-
-WEIGHTS = "/home/niklaspaulig/Dropbox/TU Dresden/hpc/experiments/MaxMinDQN_a-PathFollower-v0-downstream-06-03-01-8°-broadriver-alt-2022-08-29--25854"
-
 if AGENT_NAME[-1].islower():
     validate_agent(AGENT_NAME[:-2])
     discrete = is_discrete(AGENT_NAME[:-2])
