@@ -69,7 +69,7 @@ class ConfigFile:
     def __init__(self, file: str) -> None:
 
         self.file = file
-        self.weights = []
+        self.weights = None
 
         # Load the YAML or JSON file into a dict
         if self.file.lower().endswith(".json"):
