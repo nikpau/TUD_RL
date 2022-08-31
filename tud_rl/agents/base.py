@@ -140,7 +140,7 @@ class BaseAgent(_Agent):
                 raise NotImplementedError("Input normalization is not available for images.")
 
         assert self.loss in ["SmoothL1Loss", "MSELoss"], "Pick 'SmoothL1Loss' or 'MSELoss', please."
-        assert self.optimizer_name_name in ["Adam", "RMSprop"], "Pick 'Adam' or 'RMSprop' as optimizer, please."
+        assert self.optimizer_name in ["Adam", "RMSprop"], "Pick 'Adam' or 'RMSprop' as optimizer, please."
         assert self.device in ["cpu", "cuda"], "Unknown device."
 
         # gpu support

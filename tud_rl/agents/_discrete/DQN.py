@@ -74,8 +74,8 @@ class DQNAgent(BaseAgent):
             p.requires_grad = False
 
         # define optimizer
-        if self.optimizer_name_name == "Adam":
-            self.optimizer_name = optim.Adam(self.DQN.parameters(), lr=self.lr)
+        if self.optimizer_name == "Adam":
+            self.optimizer = optim.Adam(self.DQN.parameters(), lr=self.lr)
         else:
             self.optimizer = optim.RMSprop(self.DQN.parameters(), lr=self.lr, alpha=0.95, centered=True, eps=0.01)
 
