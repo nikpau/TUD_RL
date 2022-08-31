@@ -455,7 +455,7 @@ class PathFollower(gym.Env):
             if action <=0:
                 return max(self.delta-self.cra,-self.MAX_RUDDER)
             else:
-                return min(self.delta+self.scr,self.MAX_RUDDER)
+                return min(self.delta+self.cra,self.MAX_RUDDER)
 
         # Test Range
         if self.cra > self.delta:
