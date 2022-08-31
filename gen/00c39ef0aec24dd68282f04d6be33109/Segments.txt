@@ -1,0 +1,10 @@
+Segment 0: <StraightSegment(in_angle=70.00, length=1402.00)>
+Segment 1: <CurvedSegment(out_angle=65.00, curvature=left, length=3118.31)>
+Segment 2: <StraightSegment(in_angle=65.00, length=1446.00)>
+Segment 3: <CurvedSegment(out_angle=94.00, curvature=right, length=3921.60)>
+Segment 4: <StraightSegment(in_angle=94.00, length=592.00)>
+Segment 5: <CurvedSegment(out_angle=120.00, curvature=right, length=2177.98)>
+Segment 6: <StraightSegment(in_angle=120.00, length=1209.00)>
+Segment 7: <CurvedSegment(out_angle=149.00, curvature=right, length=4682.60)>
+Segment 8: <StraightSegment(in_angle=149.00, length=1926.00)>
+Segment 9: <CurvedSegment(out_angle=126.00, curvature=left, length=1441.63)>
