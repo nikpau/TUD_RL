@@ -40,7 +40,7 @@ TRAIN_ON_TAURUS: bool = True
 
 # Options for river generation
 rg.options.VERBOSE = False
-rg.options.GP = 76
+rg.options.GP = 101
 
 if TRAIN_ON_TAURUS:
     RIVERDATA = os.path.abspath("/home/s2075466/riverdata")
@@ -53,6 +53,10 @@ else:
 # Train on generated river.
 # Validate on lower rhine
 TRAIN = True
+
+# Number of evenly spaced gridpoints for which stream 
+# velocity and water depth data is available
+N_GRIDPOINTS = 26 if not TRAIN else rg.options.GP
 
 # Types
 State = TypeVar("State")
@@ -68,11 +72,8 @@ class PathFollower(gym.Env):
         self.DIR = direction
         self.mode = mode
 
-        # Number of evenly spaced gridpoints for which stream 
-        # velocity and water depth data is available.
         # All Gridpoints are BASEPOINT_DIST meters apart 
         # to span a maximum rhine width of 500 meters
-        self.GRIDPOINTS: int = 26
         self.BASEPOINT_DIST: int = 20
 
         # Convergance rate of vector field for vector field guidance
@@ -530,7 +531,7 @@ class PathFollower(gym.Env):
         }
 
         # To use only the middle portion of the river
-        offset = self.GRIDPOINTS // 3
+        offset = N_GRIDPOINTS // 3
 
         for col in range(arraysize):
             # Get middle thrid per column
@@ -540,7 +541,7 @@ class PathFollower(gym.Env):
 
             # Average to river midpoint to keep the path
             # more centered on the river
-            max_ind = (max_ind + self.GRIDPOINTS//2)//2
+            max_ind = (max_ind + N_GRIDPOINTS//2)//2
 
             # Construct noise
             noise = random.randrange(-1,2)
@@ -579,9 +580,9 @@ class PathFollower(gym.Env):
         free_space: np.ndarray[bool] = self._wdarray - draft < self.MIN_UNDER_KEEL
 
         lower_poly = np.full(free_space.shape[0], int(0))
-        upper_poly = np.full(free_space.shape[0], self.GRIDPOINTS - 1)
+        upper_poly = np.full(free_space.shape[0], N_GRIDPOINTS - 1)
 
-        max_index = self.GRIDPOINTS - 1
+        max_index = N_GRIDPOINTS - 1
         for i in range(free_space.shape[0]):
             mid_index: int = self.path_index[i]
             searching_upper: bool = True
@@ -1020,7 +1021,7 @@ class PathFollower(gym.Env):
 
         for idx, point in enumerate(ptc):
             for col in search_range:
-                for colidx in range(self.GRIDPOINTS):
+                for colidx in range(N_GRIDPOINTS):
                     x = self.rx[col][colidx]
                     y = self.ry[col][colidx]
                     dtp = d((x, y), point)
@@ -1501,32 +1502,35 @@ class PathFollower(gym.Env):
             coords (ArrayLike): array of coordinates
             metrics (ArrayLike): array of metrics
         """
+        # Since our generated river can have variable width
+        # I implement a switch here.
+
         # River X coordinate
-        self.rx = np.array([coords[row][0] for row, _ in enumerate(coords)])
-        self.rx = self.rx.reshape((-1, self.GRIDPOINTS))
+        self.rx = np.array([row[0] for row in coords])
+        self.rx = self.rx.reshape((-1, N_GRIDPOINTS))
 
         # River Y coordinate
-        self.ry = np.array([coords[row][1] for row, _ in enumerate(coords)])
-        self.ry = self.ry.reshape((-1, self.GRIDPOINTS))
+        self.ry = np.array([row[1] for row in coords])
+        self.ry = self.ry.reshape((-1, N_GRIDPOINTS))
 
         # Extract water depth and reshape
         if TRAIN:
-            self._wdarray = np.array([metrics[row][3] for row, _ in enumerate(metrics)])
+            self._wdarray = np.array([row[3] for row  in metrics])
         else:
-            self._wdarray = np.array([math.sqrt(metrics[row][3]) for row, _ in enumerate(metrics)])
+            self._wdarray = np.array([math.sqrt(row[3]) for row in metrics])
             self._wdarray = self._wdarray + 4
-        self._wdarray = self._wdarray.reshape((-1, self.GRIDPOINTS))
+        self._wdarray = self._wdarray.reshape((-1, N_GRIDPOINTS))
 
         # Stream direction
-        self.str_diry = np.array([metrics[row][1] for row, _ in enumerate(metrics)])
-        self.str_diry = self.str_diry.reshape((-1, self.GRIDPOINTS))
+        self.str_diry = np.array([row[1] for row in metrics])
+        self.str_diry = self.str_diry.reshape((-1, N_GRIDPOINTS))
 
-        self.str_dirx = np.array([metrics[row][2] for row, _ in enumerate(metrics)])
-        self.str_dirx = self.str_dirx.reshape((-1, self.GRIDPOINTS))
+        self.str_dirx = np.array([row[2] for row in metrics])
+        self.str_dirx = self.str_dirx.reshape((-1, N_GRIDPOINTS))
 
         # Extract stream velocity and reshape
-        self._strvelarray = np.array([metrics[row][6]for row, _ in enumerate(metrics)])
-        self._strvelarray = self._strvelarray.reshape((-1, self.GRIDPOINTS))
+        self._strvelarray = np.array([row[6]for row  in metrics])
+        self._strvelarray = self._strvelarray.reshape((-1, N_GRIDPOINTS))
 
 
 # Additional helper functions and classes -------------------------------
@@ -1550,13 +1554,11 @@ def import_river(path: str) -> Tuple[Dict[str, list], Dict[str, list]]:
         path += "/"
 
     for file in ["coords", "metrics"]:
-        with open(path + file + ".txt", "r") as f:
-            reader = csv.reader(f, delimiter=' ')
-            for row in reader:
-                tmp = [float(entry) for entry in row]
-                data[file].append(tmp)
+        with open(f"{path}{file}.txt", "r") as f:
+            reader = csv.reader(f, delimiter=" ")
+            data[file] = list(reader)
 
-    return np.array(data["coords"]), np.array(data["metrics"])
+    return np.array(data["coords"],dtype=float), np.array(data["metrics"],dtype=float)
 
 def random_river(nsegments: int, var: float, vel: float) -> Tuple[Dict[str, list], Dict[str, list]]:
     """Generate a random river with nsegments from the rivergen package.
@@ -1649,9 +1651,7 @@ if __name__ == "__main__":
     s = p.reset()
     for i in range(1000):
         p.pid_step()
-        if i == 999:
-            p.render()
-            break
+        p.render()
 
     SAVE = False
     if SAVE:
