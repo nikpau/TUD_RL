@@ -37,7 +37,10 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple, TypeVar, Union
 PI = math.pi
 TWOPI = 2*PI
 TRAIN_ON_TAURUS: bool = True
+
+# Options for river generation
 rg.options.VERBOSE = False
+rg.options.GP = 76
 
 if TRAIN_ON_TAURUS:
     RIVERDATA = os.path.abspath("/home/s2075466/riverdata")
@@ -47,7 +50,8 @@ else:
     RIVERDATA = os.path.abspath(f"/{PREFIX}/{getuser()}/Dropbox/TU Dresden/riverdata")
     matplotlib.use("TKAgg")
 
-# Scenario directory
+# Train on generated river.
+# Validate on lower rhine
 TRAIN = True
 
 # Types
@@ -721,13 +725,13 @@ class PathFollower(gym.Env):
         dist = math.sqrt((x1-x2)**2 + (Y1-Y2)**2)
         angle = math.acos((Y1-Y2)/(dist))
 
-        if x2 <= x1 and y2 < y1:
+        if x2 <= x1 and y2 <= y1:
             course = PI + angle
-        elif x2 >= x1 and y2 > y1:
+        elif x2 >= x1 and y2 >= y1:
             course = angle
-        elif x2 <= x1 and y2 > y1:
+        elif x2 <= x1 and y2 >= y1:
             course = TWOPI - angle
-        elif x2 >= x1 and y2 < y1:
+        elif x2 >= x1 and y2 <= y1:
             course = PI - angle
 
         course = course if self.DIR == 1 else course + PI
