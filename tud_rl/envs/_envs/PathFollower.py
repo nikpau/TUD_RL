@@ -243,7 +243,7 @@ class PathFollower(gym.Env):
         self,*, 
         seed: Optional[int] = None, 
         return_info: Optional[bool] = False,
-        options: Optional[dict] = None
+        options: Optional[dict] = {}
         ) -> Union[State, Tuple[State,dict]]:
 
         if seed is not None:
@@ -287,34 +287,29 @@ class PathFollower(gym.Env):
 
         # Hard path
         #self.waypoint_idx = 4200
-        #self.waypoint_idx = 4600
+        self.waypoint_idx = 4600
 
         #Test for Scenario
-        self.waypoint_idx = 100
+        #self.waypoint_idx = 10
         #self.waypoint_idx = 400
 
         # Get the index of waypoint behind agent
         self.lwp_idx = self.get_lwp_idx(self.waypoint_idx)
 
         # Last waypoint and next waypoint
-        self.lwp = self.get_red_wp()
-        self.nwp = self.get_red_wp(1)
+        self.lwp = self.get_red_wp(self.lwp_idx)
+        self.nwp = self.get_red_wp(self.lwp_idx, 1)
 
         # Agent position plus some random noise
         self._agpos = (
-            (start_x(self.waypoint_idx) + random.uniform(-20, 20)),
-            (start_y(self.waypoint_idx) + random.uniform(-10, 10))
+            (start_x(self.waypoint_idx)), #+ random.uniform(-20, 20)),
+            (start_y(self.waypoint_idx)) #+ random.uniform(-10, 10))
         )        
 
         # Set agent heading to path heading plus some small noise (5° = 1/36*pi rad)
         #random_angle = 2/36*PI
         self._aghead = self.path_angle(
-            p1=(start_x(self.waypoint_idx),
-                start_y(self.waypoint_idx)
-            ),
-            p2=(start_x(self.waypoint_idx+1),
-                start_y(self.waypoint_idx+1)
-            )
+            p1=self.lwp, p2=self.nwp
         )# + random_angle
 
         # Drift angle == 0 -> movement heading is same as agent heading
@@ -735,7 +730,7 @@ class PathFollower(gym.Env):
         elif x2 >= x1 and y2 <= y1:
             course = PI - angle
 
-        course = course if self.DIR == 1 else course + PI
+        #course = course if self.DIR == 1 else course + PI
 
         return course % TWOPI
 
@@ -782,7 +777,7 @@ class PathFollower(gym.Env):
         ahead = 1
 
         # Distance between any two waypoints
-        dbw = self.dist(self.lwp, self.get_red_wp(ahead))
+        dbw = self.dist(self.lwp, self.get_red_wp(self.lwp_idx,ahead))
 
         # Distance to the last waypoint
         dist_to_last = self.dist(self.agpos, self.lwp)
@@ -791,7 +786,7 @@ class PathFollower(gym.Env):
 
         path_heading = self.path_angle(self.lwp, self.nwp)
         next_heading = self.path_angle(
-            self.nwp, self.get_red_wp(ahead + 1))
+            self.nwp, self.get_red_wp(self.lwp_idx,ahead + 1))
 
         if path_heading - next_heading <= -PI:
             path_heading += TWOPI
@@ -803,10 +798,7 @@ class PathFollower(gym.Env):
         frac = dist_on_wp/dbw
 
         # Angle pointing towards path (Vector field)
-        if self.DIR == 1:
-            tan_cte = - math.atan(self.K * self.cte)
-        else:
-           tan_cte = - math.atan(self.K * self.cte) + PI
+        tan_cte = -math.atan(self.K * self.cte)
            
         # Desired heading as a weighted sum 
         # of current and next path segment
@@ -828,7 +820,7 @@ class PathFollower(gym.Env):
         front of it. Therefore last and next waypoint switch, and the
         waypoint to be checked becomes the next waypoint.
         """
-        to_check = self.get_red_wp(plus_n=2)
+        to_check = self.get_red_wp(self.lwp_idx,plus_n=2)
         
         dist_to_last = self.dist(self.agpos, self.lwp)
         dist_to_check = self.dist(self.agpos, to_check)
@@ -843,11 +835,11 @@ class PathFollower(gym.Env):
         """Switch last and next waypoint if agent crossed
         a waypoint"""
 
-        to_check = self.get_red_wp(plus_n=2)
+        new_nwp = self.get_red_wp(self.lwp_idx,plus_n=2)
         # Waypoint to check is closer than the old one
         # -> switch waypoints
         self.lwp = self.nwp
-        self.nwp = to_check
+        self.nwp = new_nwp
         if self.DIR == 1:
             self.lwp_idx += 1
         elif self.DIR == -1:
@@ -872,7 +864,7 @@ class PathFollower(gym.Env):
                 elif self.DIR == -1:
                     return idx
 
-    def get_red_wp(self, plus_n: int = 0) -> Tuple[float, float]:
+    def get_red_wp(self,lwp_idx: int, plus_n: int = 0) -> Tuple[float, float]:
         """Get the x and y coordinate of the waypoint 
         behind the agent if plus_n==0. 
 
@@ -885,11 +877,11 @@ class PathFollower(gym.Env):
         """
         
         if self.DIR == 1:
-            x = self.red_path["x"][self.lwp_idx + plus_n]
-            y = self.red_path["y"][self.lwp_idx + plus_n]
+            x = self.red_path["x"][lwp_idx + plus_n]
+            y = self.red_path["y"][lwp_idx + plus_n]
         elif self.DIR == -1:
-            x = self.red_path["x"][self.lwp_idx - plus_n]
-            y = self.red_path["y"][self.lwp_idx - plus_n]
+            x = self.red_path["x"][lwp_idx - plus_n]
+            y = self.red_path["y"][lwp_idx - plus_n]
 
 
         return x, y
@@ -1071,18 +1063,20 @@ class PathFollower(gym.Env):
                 plt.subplots_adjust(left=0.05,right=0.95,top=0.95,bottom=0.05)
 
             self.ax.clear()
-            # self.ax.contourf(self.rx_frame, self.ry_frame,
-            #                  self.wd_frame, cmap=cm.ocean)
-            # self.ax.quiver(self.rx_frame[::2, ::2], self.ry_frame[::2, ::2],
-            #                self.str_diry_frame[::2,
-            #                                    ::2], self.str_dirx_frame[::2, ::2],
-            #                scale=200, headwidth=2)
-            self.ax.contourf(self.rx, self.ry,
-                             self._wdarray, cmap=cm.ocean, 
-                             levels = np.linspace(np.min(self._wdarray),np.max(self._wdarray),30))
-            self.ax.quiver(self.rx, self.ry,
-                           self.str_diry, self.str_dirx,
-                           scale=100, headwidth=2)
+            WITH_FRAMES = True
+            if WITH_FRAMES:
+                self.ax.contourf(self.rx_frame, self.ry_frame,
+                                self.wd_frame, cmap=cm.ocean)
+                self.ax.quiver(self.rx_frame[::2, ::2], self.ry_frame[::2, ::2],
+                            self.str_diry_frame[::2,::2], self.str_dirx_frame[::2, ::2],
+                            scale=200, headwidth=2)
+            else:
+                self.ax.contourf(self.rx, self.ry,
+                                 self._wdarray, cmap=cm.ocean, 
+                                 levels = np.linspace(np.min(self._wdarray),np.max(self._wdarray),30))
+                self.ax.quiver(self.rx, self.ry,
+                               self.str_diry, self.str_dirx,
+                               scale=100, headwidth=2)
             self.ax.plot(self.red_path["x"], self.red_path["y"],
                 color="red",
                 marker=None)
@@ -1653,7 +1647,7 @@ if __name__ == "__main__":
         p.pid_step()
         p.render()
 
-    SAVE = False
+    SAVE = True
     if SAVE:
         path = "trajectory_plots/"
         with open(path + "cte", "w") as file:
