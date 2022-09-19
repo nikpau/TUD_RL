@@ -59,8 +59,8 @@ class DDPGAgent(BaseAgent):
                                        out_size  = 1,
                                        net_struc = self.net_struc_critic).to(self.device)
 
-        # number of parameters for actor and critic
-        self.n_params = self._count_params(self.actor), self._count_params(self.critic)
+                # number of parameters for actor and critic
+                self.n_params = self._count_params(self.actor), self._count_params(self.critic)
 
         # load prior weights if available
         if self.weights is not None:
