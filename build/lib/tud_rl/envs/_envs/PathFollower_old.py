@@ -1,14 +1,11 @@
 import copy
 import csv
-from dataclasses import dataclass
 import json
 import math
 import os
-from os.path import abspath, isdir
 import platform
 import random
 import shutil
-from enum import Enum
 
 import gym
 import matplotlib
@@ -16,7 +13,6 @@ import matplotlib.pyplot as plt
 import mmgdynamics as mmg
 import rivergen as rg
 import numpy as np
-from multiprocessing import Pool
 from gym import spaces
 from gym.utils import seeding
 from matplotlib import cm, transforms
@@ -24,6 +20,7 @@ from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from matplotlib.figure import Figure
 from matplotlib.patches import Patch, Rectangle
 from mmgdynamics.structs import RudderAngle, Surge, Sway, YawRate
+from numpy.typing import ArrayLike
 
 try:
     from mmgdynamics.calibrated_vessels import SPTRR1
@@ -41,77 +38,56 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple, TypeVar, Union
 PI = math.pi
 TWOPI = 2*PI
 TRAIN_ON_TAURUS: bool = False
-
-
-# Options for river generation
 rg.options.VERBOSE = False
-rg.options.GP = 101
 
 if TRAIN_ON_TAURUS:
-    RIVERDATA = abspath("/home/s2075466/riverdata")
+    RIVERDATA = os.path.abspath("/home/s2075466/riverdata")
     matplotlib.use("Agg")
 else:
     PREFIX = "Users" if platform.system() == "Windows" else "home"
+    RIVERDATA = os.path.abspath(f"/{PREFIX}/{getuser()}/Dropbox/TU Dresden/riverdata")
     matplotlib.use("TKAgg")
 
-@dataclass(frozen=True)
-class DATAPATHS:
-    lr = abspath(f"/{PREFIX}/{getuser()}/Dropbox/TU Dresden/riverdata/lr")
-    mr = abspath(f"/{PREFIX}/{getuser()}/Dropbox/TU Dresden/riverdata/mr")
-    straight = abspath(f"/{PREFIX}/{getuser()}/Dropbox/TU Dresden/segGen/scenes/straight")
-    straight_bow = abspath(f"/{PREFIX}/{getuser()}/Dropbox/TU Dresden/segGen/scenes/current_to_bow")
-    straight_stern = abspath(f"/{PREFIX}/{getuser()}/Dropbox/TU Dresden/segGen/scenes/current_to_stern")
-
-# Train on generated river.
-# Validate on lower rhine
-TRAIN = False
-
-WITHFRAMES = True
-
-# Number of evenly spaced gridpoints for which stream
-# velocity and water depth data is available
-N_GRIDPOINTS = 26 if not TRAIN else rg.options.GP
+# Scenario directory
+SCENARIO_DIR = os.path.abspath(f"/{PREFIX}/{getuser()}/Dropbox/TU Dresden/riverdata/scenes")
+TRAIN = True
 
 # Types
 State = TypeVar("State")
-@dataclass
-class Point:
-    x: np.float64
-    y: np.float64
-
-class SCENARIO(Enum):
-    DUSSELDORF = 4200
-    LR_STRAIGHT = 7300
-    LORELEI = 2500
-    DOWNSTREAM = 2
-    LR_UPSTREAM = 9800
-    MR_UPSTREAM = 2860
 
 # --------- Gym Env ----------------------------------------------
 
 class PathFollower(gym.Env):
-    def __init__(self, direction: int, epi_steps: int = np.inf, mode = "step") -> None:
+    def __init__(self, direction: int, epi_steps: int = 2000, mode = "step") -> None:
         super().__init__()
 
         assert direction in [-1,1], "Invalid direction"
-        assert mode in ["step","cont"]
+        assert mode in ["step","abs"]
         self.DIR = direction
         self.mode = mode
 
-        # All Gridpoints are BASEPOINT_DIST meters apart
+        # Number of evenly spaced gridpoints for which stream 
+        # velocity and water depth data is available.
+        # All Gridpoints are BASEPOINT_DIST meters apart 
         # to span a maximum rhine width of 500 meters
+        self.GRIDPOINTS: int = 26
         self.BASEPOINT_DIST: int = 20
 
-        self.K: float = 0.005 # Convergence rate of vector field for vector field guidance
-        self.C: float = -1 # Derivative pentalty constant
-        self.T = 0.01 # Constant for tanh of cte
+        # Convergance rate of vector field for vector field guidance
+        self.K: float = 0.005
+
+        # Derivative pentalty constant
+        self.C: float = -1
+
+        # Constant for tanh of cte
+        self.T = 0.01
 
         # Rudder increment/decrement per action [deg]
         RUDDER_INCR: int = 2
         self.RUDDER_INCR = to_rad(RUDDER_INCR)
-
+        
         # Maximum possible rudder angle [deg]
-        MAX_RUDDER: int = 20
+        MAX_RUDDER: int = 8
         self.MAX_RUDDER = to_rad(MAX_RUDDER)
 
         # Minimum water under keel [m]
@@ -124,24 +100,30 @@ class PathFollower(gym.Env):
         if TRAIN:
             self.RIVERPATH = None
         else:
-            self.set_arrs(*import_river(DATAPATHS.mr))
-            self.waypoint_idx = SCENARIO.LORELEI.value
+            self.set_arrs(*import_river(RIVERDATA))
 
         # Path roughness (Use only every nth data point of the path)
-        self.SMOOTHNESS: int = 5
+        self.ROUGHNESS: int = 5
 
         # Render distance for faster rendering
         self.lookahead = 80
         self.lookbehind = 60
 
         # Vessel set-up ------------------------------------------------
-        self.delta = 0.0 # Rudder angle [rad]
-        self.nps = 4.0 # Propeller revolutions [s⁻¹]
-        self.speed = 0# Overall vessel speed [m/s]
+
+        # Rudder angle [rad]
+        self.delta = 0.0
+
+        # Propeller revolutions [s⁻¹]
+        self.nps = 8.0 if self.DIR == -1 else 6.0
+
+        # Overall vessel speed [m/s]
+        self.speed = 0
 
         # Vessel to be simulated
+        # seiunmaru  # calibrate(GMS,1000)
         #self.vessel: InlandVessel = InlandVessel(**SPTRR1)
-        self.vessel: Vessel = Vessel(**kvlcc2_fully_loaded)
+        self.vessel: Vessel = Vessel(**kvlcc2)
 
         # Movement heading can include drift angles
         self._movement_heading = 0.0
@@ -153,16 +135,11 @@ class PathFollower(gym.Env):
         self.history: History = History()
 
         # PID specific constants ----------------------------------------------
-        self.K_p = 2.8 # Proportional gain
-        self.K_d = 64.46 # Derivative gain
-        self.K_i = 0.0 # Integrator gain
-
-        # self.K_p = 170/180*PI # Proportional gain
-        # self.K_d = 16 # Derivative gain
-        # self.K_i = 0.042/180*PI # Integrator gain
-
+        self.K_p = 18/180*PI # Proportional gain
+        self.K_d = 46/180*PI # Derivative gain
+        self.K_i = 0.05/180*PI # Integrator gain
         self.integator_sum = 0.0 # Sum of the integrator over time
-        self.pid_error = 0.0 # Error between
+        self.pid_error = 0.0 # Error between 
         self.commanded_rudder_angle = 0.0 # PID commanded rudder angle in [deg]
         self.r_lt = 0.0
 
@@ -170,19 +147,13 @@ class PathFollower(gym.Env):
         self.observation_space = spaces.Box(
             low=-np.inf,
             high=np.inf,
-            shape=(14,),
+            shape=(9,),
             dtype=float
         )
 
         # Set action space according to mode
-        self.n_actions = 3 if self.mode == "step" else 1
-        if self.mode == "step":
-            self.action_space = spaces.Discrete(self.n_actions)
-        else:
-            self.action_space = spaces.Box(
-                low=np.array([-1.]),
-                high=np.array([1.])
-            )
+        self.n_actions = 9 if self.mode == "abs" else 3
+        self.action_space = spaces.Discrete(self.n_actions)
 
         self.max_episode_steps = epi_steps
 
@@ -196,17 +167,17 @@ class PathFollower(gym.Env):
     def state(self) -> State:
         """Current environment state"""
         return self._state
-
+    
     @property
     def ivs(self) -> InitialValues:
         """Initial values for numerical integration"""
         return self._ivs
-
+    
     @ivs.setter
     def ivs(self,value):
         """Set initial values for numerical integration"""
         self._ivs = value
-
+    
     @property
     def strvel(self) -> float:
         """Stream velocity in [m/s]"""
@@ -223,15 +194,10 @@ class PathFollower(gym.Env):
         return self._wd
 
     @property
-    def agpos(self) -> Point:
-        """Agent position as Point"""
+    def agpos(self) -> Tuple[float,float]:
+        """Agent position as an (x,y) tuple"""
         return self._agpos
-
-    @agpos.setter
-    def agpos(self, val) -> Point:
-        """Set the agent position"""
-        self._agpos = val
-
+    
     @property
     def aghead(self) -> float:
         """Agent heading in [rad]"""
@@ -241,22 +207,22 @@ class PathFollower(gym.Env):
     def cte(self) -> float:
         """Cross-track error in [m]"""
         return self._cte
-
+    
     @property
     def desired_course(self) -> float:
         """Desired course in [rad]"""
         return self._dc
-
+    
     @property
     def heading_error(self) -> float:
         """Error from current to desired heading in [rad]"""
         return self.rel_ang_diff(self.desired_course, self.movement_heading)
-
+    
     @property
     def movement_heading(self) -> float:
         """Heading of vessel considering drift angle"""
         return self._movement_heading
-
+    
     @property
     def cra(self) -> float:
         """"Commanded rudder angle in [rad]"""
@@ -265,23 +231,21 @@ class PathFollower(gym.Env):
     # ------------------------------------------------------------------
 
     def reset(
-        self,*,
-        seed: Optional[int] = None,
+        self,*, 
+        seed: Optional[int] = None, 
         return_info: Optional[bool] = False,
-        options: Optional[dict] = {}
+        options: Optional[dict] = None
         ) -> Union[State, Tuple[State,dict]]:
 
         if seed is not None:
             self._np_random, seed = seeding.np_random(seed)
-
-        self.history = History()
-
+        
         # Generate new random river if training
         if TRAIN:
             if self.RIVERPATH is not None:
                 delete_river(self.RIVERPATH)
-            self.RIVERPATH = random_river(20,1,1.5)
-            self.set_arrs(*import_river(abspath(f"./{self.RIVERPATH}")))
+            self.RIVERPATH = random_river(10,1,1.5)
+            self.set_arrs(*import_river(os.path.abspath(f"./{self.RIVERPATH}")))
 
         def start_x(x): return self.path["x"][x]
         def start_y(y): return self.path["y"][y]
@@ -292,34 +256,57 @@ class PathFollower(gym.Env):
         # The path_index variable gets filled here.
         self.path = self.construct_path()
         self.red_path = self.smooth(
-            copy.deepcopy(self.path),self.SMOOTHNESS, alpha=0.1
+            copy.deepcopy(self.path),self.ROUGHNESS, alpha=0.1
         )
-        self.history.save_path(self)
 
         # Get the border to port and starboard where
         # the water depth equals the ship draft
         self.build_fairway_border()
+        
+        if self.DIR == 1:
+            self.waypoint_idx = random.randrange(
+                10,int(len(self.path["idx"])*0.8)
+            )
+        elif self.DIR == -1:
+            self.waypoint_idx = random.randrange(
+                int(len(self.path["idx"])*0.2),
+                int(len(self.path["idx"])*0.8)
+            )
 
+        # Easy path
+        #self.waypoint_idx = 7500
+
+        # Hard path
+        #self.waypoint_idx = 4200
+        #self.waypoint_idx = 4600
+
+        #Test for Scenario
+        self.waypoint_idx = 20
+        #self.waypoint_idx = 400
 
         # Get the index of waypoint behind agent
         self.lwp_idx = self.get_lwp_idx(self.waypoint_idx)
 
         # Last waypoint and next waypoint
-        self.lwp = self.get_red_wp(self.lwp_idx)
-        self.nwp = self.get_red_wp(self.lwp_idx, 1)
+        self.lwp = self.get_red_wp()
+        self.nwp = self.get_red_wp(1)
 
         # Agent position plus some random noise
-        self._agpos = Point(
+        self._agpos = (
             (start_x(self.waypoint_idx) + random.uniform(-20, 20)),
-            (start_y(self.waypoint_idx) + random.uniform(-10, 10)))
-
-        self._agpos = Point(
-            (start_x(self.waypoint_idx)),(start_y(self.waypoint_idx))
-        )
+            (start_y(self.waypoint_idx) + random.uniform(-10, 10))
+        )        
 
         # Set agent heading to path heading plus some small noise (5° = 1/36*pi rad)
         random_angle = 2/36*PI
-        self._aghead = self.path_angle(p1=self.lwp, p2=self.nwp)# + random_angle
+        self._aghead = self.path_angle(
+            p1=(start_x(self.waypoint_idx),
+                start_y(self.waypoint_idx)
+            ),
+            p2=(start_x(self.waypoint_idx+3),
+                start_y(self.waypoint_idx+3)
+            )
+        ) + random_angle
 
         # Drift angle == 0 -> movement heading is same as agent heading
         self._movement_heading = self.aghead
@@ -333,16 +320,23 @@ class PathFollower(gym.Env):
             self.init_vessel()
 
         # Get water depth, current velocity
-        # and current direction for the agent's position
+        # and current direction for the agent's postition
         # Water depth in [m]
         # Velocity in [m/s]
         # Direction in [rad]
         self.find_river_metrics()
 
-        self.update_cross_track_error() # Cross track error [m]
-        self.update_desired_course()# Desired course [rad]
-        self.reset_ivs() # Reset the vessel dynamics to their initial state
-        self.build_state() # Construct state
+        # Cross track error [m]
+        self.update_cross_track_error()
+
+        # Desired course [rad]
+        self.update_desired_course()
+
+        # Reset the vessel dynamics to their initial state
+        self.reset_ivs()
+
+        # Construct state 
+        self.build_state()
 
         if return_info:
             return self.state, options
@@ -355,9 +349,13 @@ class PathFollower(gym.Env):
         if self.timestep >= self.max_episode_steps:
             self.done = True
 
+        # Force agent to repeat same action
+        # if self.timestep != 1 and self.timestep % 5 != 0:
+        #     action = self.history.action[-1]
+
         # Map action to change in rudder
         self.delta = self.map_action(action, self.mode)
-
+        
         # Unpack starting values for ode solver
         uvr = np.array([self.ivs.u,self.ivs.v,self.ivs.r])
 
@@ -405,7 +403,7 @@ class PathFollower(gym.Env):
         # Cross track error [m]
         self.update_cross_track_error()
 
-        # Update desired course based on cross-track-error
+        # Update desired course based on corss-track-error
         self.update_desired_course()
 
         # Log relevant values
@@ -447,43 +445,54 @@ class PathFollower(gym.Env):
         else:
             # Offset actions so that median(n_actions) = noop
             action -= int(self.n_actions/2)
-
+            
             # Commanded rudder angle
             self._cra = float(action*self.RUDDER_INCR)
-            if action <=0:
-                return max(self.delta-self.cra,-self.MAX_RUDDER)
-            else:
-                return min(self.delta+self.cra,self.MAX_RUDDER)
+            return float(action*self.RUDDER_INCR)
 
+        if self.cra > self.delta:
+            return min(
+                self.delta + self.RUDDER_INCR,
+                self.MAX_RUDDER
+            )
+        elif self.cra < self.delta:
+            return max(
+                self.delta - self.RUDDER_INCR,
+                -self.MAX_RUDDER
+            )
+        else:
+            return self.delta
+            
     def calculate_reward(self) -> float:
 
         draft = self.vessel.d
 
-        if self.wd < 1.2*draft:
+        if self.wd - draft < self.MIN_UNDER_KEEL:
             self.done = True
-            border_penalty = -20
+            border = -20
         else:
-            border_penalty = 0
-
+            border = 0
+        
         try:
-            r_comf = 1 if self.history.action[-2] == self.history.action[-1] else 0
+            deriv = 1 if self.delta == self.history.delta[-2] else 0
         except:
-            r_comf = 0
+            deriv = 0.0     
 
-        # Hyperparameter controlling the steepness
+        k_rot = 20#100
+        r_rot = math.exp(-k_rot * abs(self.history.r[-1]))
+
+        # Hyperparameter controling the steepness
         # of the exponentiated cross track error
         k_cte = 0.1
         r_cte = math.exp(-k_cte * abs(self.cte))
 
         # Reward for heading angle
-        k_ang = 10
-        r_ang = math.exp(-k_ang * abs(self.heading_error))
+        k_head = 10
+        r_ang = math.exp(-k_head * abs(self.heading_error))
 
-        #weights = np.array([0.6,0.2,0.2])
-        weights = np.array([0.6,0.4,0.0])
-        rewards = np.array([r_cte,r_ang,r_comf])
+        weights = [0.5,0.1,0.4]
 
-        return weights@rewards + border_penalty
+        return weights[0]*r_cte + weights[1]*r_ang + weights[2]*deriv + border
 
     def construct_path(self) -> Dict[str,List[float]]:
         """Generate the path for the vessel to follow.
@@ -509,7 +518,7 @@ class PathFollower(gym.Env):
         }
 
         # To use only the middle portion of the river
-        offset = N_GRIDPOINTS // 3
+        offset = self.GRIDPOINTS // 3
 
         for col in range(arraysize):
             # Get middle thrid per column
@@ -519,7 +528,7 @@ class PathFollower(gym.Env):
 
             # Average to river midpoint to keep the path
             # more centered on the river
-            max_ind = (max_ind + N_GRIDPOINTS//2)//2
+            max_ind = (max_ind + self.GRIDPOINTS//2)//2
 
             # Construct noise
             noise = random.randrange(-1,2)
@@ -555,12 +564,12 @@ class PathFollower(gym.Env):
 
         draft = self.vessel.d
 
-        free_space: np.ndarray[bool] = self._wdarray < 1.2*draft
+        free_space: np.ndarray[bool] = self._wdarray - draft < self.MIN_UNDER_KEEL
 
         lower_poly = np.full(free_space.shape[0], int(0))
-        upper_poly = np.full(free_space.shape[0], N_GRIDPOINTS - 1)
+        upper_poly = np.full(free_space.shape[0], self.GRIDPOINTS - 1)
 
-        max_index = N_GRIDPOINTS - 1
+        max_index = self.GRIDPOINTS - 1
         for i in range(free_space.shape[0]):
             mid_index: int = self.path_index[i]
             searching_upper: bool = True
@@ -587,6 +596,11 @@ class PathFollower(gym.Env):
             "y": np.array([self.ry[i][lower_poly[i]]
                            for i in range(self._wdarray.shape[0])])
         }
+
+        # self.star_border = self.smooth(
+        #     self.star_border, 1, alpha=0.5)
+        # self.port_border = self.smooth(
+        #     self.port_border, 1, alpha=0.5)
 
     def smooth(self, path: Dict[str, np.ndarray],
                every_nth: int = 2, alpha: float = 0.05) -> Dict[str, np.ndarray]:
@@ -622,35 +636,23 @@ class PathFollower(gym.Env):
         if self.timestep == 1:
             state = np.hstack(
                 [
-                    self.ivs.u,
-                    self.ivs.v,
-                    self.ivs.r,
-                    self.ivs.delta,
-                    np.zeros(4),
+                    self.ivs.u, self.ivs.v, self.ivs.r, self.ivs.delta,
+                    np.zeros(1),
                     math.tanh(self.T*self.cte),
-                    np.zeros(1),
                     self.heading_error,
-                    np.zeros(1),
-                    (self.wd - self.vessel.d)/np.max(self._wdarray),
+                    self.wd - self.vessel.d,
                     self.rel_current_attack_angle
                 ]
             )
         else:
             state = np.hstack(
                 [
-                    self.ivs.u, #surge
-                    self.ivs.v, #sway
-                    self.ivs.r, #yaw
-                    self.ivs.delta, #rudder angle
-                    self.history.u[-2],
-                    self.history.v[-2],
-                    self.history.u[-2],
+                    self.ivs.u, self.ivs.v, self.ivs.r, self.ivs.delta,
+                    #np.hstack(self.history.ivs[-10:]),
                     self.history.delta[-2],
-                    math.tanh(self.T*self.cte), #cross-track-error
-                    math.tanh(self.T*self.history.cte[-2]),
+                    math.tanh(self.T*self.cte),
                     self.heading_error,
-                    self.history.heading_error[-2],
-                    (self.wd - self.vessel.d)/np.max(self._wdarray),
+                    self.wd - self.vessel.d,
                     self.rel_current_attack_angle
                 ]
             )
@@ -691,7 +693,7 @@ class PathFollower(gym.Env):
                 z = TWOPI - abs(a1-a2)
         return float(z)
 
-    def path_angle(self, p1: Point, p2: Point) -> float:
+    def path_angle(self, p1: Tuple[float, float], p2: Tuple[float, float]) -> float:
         """Get the angle in radians from the ordinate
         for two points forming a straight line.
         Angle increases clockwise.
@@ -703,20 +705,44 @@ class PathFollower(gym.Env):
         Returns:
             float: Angle in radians
         """
-        return np.arctan2(p2.x-p1.x,p2.y-p1.y) % TWOPI
+
+        x1, y1, x2, y2 = *p1, *p2
+
+        Y1 = max(y1, y2)
+        Y2 = min(y1, y2)
+
+        dist = math.sqrt((x1-x2)**2 + (Y1-Y2)**2)
+        angle = math.acos((Y1-Y2)/(dist))
+
+        if x2 <= x1 and y2 < y1:
+            course = PI + angle
+        elif x2 >= x1 and y2 > y1:
+            course = angle
+        elif x2 < x1 and y2 > y1:
+            course = TWOPI - angle
+        elif x2 > x1 and y2 < y1:
+            course = PI - angle
+
+        course = course if self.DIR == 1 else course + PI
+
+        return course % TWOPI
 
     @staticmethod
-    def dist(p1: Point, p2: Point) -> float:
+    def dist(p1: Tuple, p2: Tuple) -> float:
         """Euler distance
 
         Args:
-            p1 (Point):1st point
-            p2 (Point):2nd point
+            p1 (Tuple): (x,y) of 1st point
+            p2 (Tuple): (x,y) of 2nd point
 
         Returns:
             float: distance between points
         """
-        return math.sqrt((p1.y-p2.y)**2 + (p1.x-p2.x)**2)
+
+        x1, y1 = p1
+        x2, y2 = p2
+
+        return math.sqrt((y1-y2)**2 + (x1-x2)**2)
 
     def update_cross_track_error(self) -> None:
         """Calculate the cross track error for vector field guidance
@@ -724,21 +750,14 @@ class PathFollower(gym.Env):
         Returns:
             float: Cross track error
         """
+        agx, agy = self.agpos  # agent postition
+        lwpx, lwpy = self.lwp  # last waypoint pos
+        nwpx, nwpy = self.nwp  # next waypoint
+
         # Calculate distance to path as the height of
         # the triangle formed by three points (agpos,lwp,nwp)
-        # two_a = np.linalg.det(
-        #     np.array(
-        #         [
-        #             [self.lwp.x,self.agpos.x,self.nwp.x],
-        #             [self.lwp.y,self.agpos.y,self.nwp.y],
-        #             [1.,1.,1.]
-        #         ],dtype=float
-        #     )
-        # )
-        # cte = two_a/self.dist(self.lwp, self.nwp)
-        ph = self.path_angle(self.lwp,self.nwp)
-        cte = (self.agpos.x - self.lwp.x)*np.cos(ph)-(self.agpos.y - self.lwp.y)*np.sin(ph)
-
+        two_a = (nwpx-lwpx)*(lwpy-agy)-(lwpx-agx)*(nwpy-lwpy)
+        cte = two_a/self.dist(self.lwp, self.nwp)
         self._cte = cte
 
     def update_desired_course(self) -> float:
@@ -747,16 +766,20 @@ class PathFollower(gym.Env):
         Returns:
             float: Desired vessel course in radians
         """
+        # Use 1 waypoint (200m) ahead as anchor
+        ahead = 1
+
         # Distance between any two waypoints
-        dbw = self.dist(self.lwp, self.get_red_wp(self.lwp_idx,1))
+        dbw = self.dist(self.lwp, self.get_red_wp(ahead))
+
+        # Distance to the last waypoint
+        dist_to_last = self.dist(self.agpos, self.lwp)
+
+        dist_on_wp = math.sqrt(dist_to_last**2 - self.cte**2)
 
         path_heading = self.path_angle(self.lwp, self.nwp)
         next_heading = self.path_angle(
-            self.nwp, self.get_red_wp(self.lwp_idx,2))
-
-        # Distance to the last waypoint (along-track-error)
-        dist_on_wp = (self.agpos.x-self.lwp.x)*math.sin(path_heading)+\
-            (self.agpos.y-self.lwp.y)*math.cos(path_heading)
+            self.nwp, self.get_red_wp(ahead + 1))
 
         if path_heading - next_heading <= -PI:
             path_heading += TWOPI
@@ -768,9 +791,12 @@ class PathFollower(gym.Env):
         frac = dist_on_wp/dbw
 
         # Angle pointing towards path (Vector field)
-        tan_cte = -math.atan(self.K * self.cte)
-
-        # Desired heading as a weighted sum
+        if self.DIR == 1:
+            tan_cte = - math.atan(self.K * self.cte)
+        else:
+           tan_cte = - math.atan(self.K * self.cte) + PI
+           
+        # Desired heading as a weighted sum 
         # of current and next path segment
         head = (1-frac)*path_heading + frac*next_heading
         dc = tan_cte + head
@@ -780,38 +806,18 @@ class PathFollower(gym.Env):
 
         self._dc = dc % TWOPI
 
-    def distance_to_starboard(self) -> float:
-        """
-        Return distance from midship to the
-        fairway border at starboard
-        """
-
-        sbx = self.star_border["x"][self.current_crosssection]
-        sby = self.star_border["y"][self.current_crosssection]
-        return self.dist(self.agpos,Point(sbx,sby))
-
-    def distance_to_port(self) -> float:
-        """
-        Return distance from midship to the
-        fairway border at port
-        """
-
-        px = self.port_border["x"][self.current_crosssection]
-        py = self.port_border["y"][self.current_crosssection]
-        return self.dist(self.agpos,Point(px,py))
-
     def crossed_waypoint(self) -> bool:
         """Determine if agent crossed a waypoint by checking
         if the distance to the waypoint after next is closer
         than to the last one.
-
+        
         If the distance to the two-steps-ahead waypoint is closer,
         we know that the vessel has crossed the next waypoint in
         front of it. Therefore last and next waypoint switch, and the
         waypoint to be checked becomes the next waypoint.
         """
-        to_check = self.get_red_wp(self.lwp_idx,plus_n=2)
-
+        to_check = self.get_red_wp(plus_n=2)
+        
         dist_to_last = self.dist(self.agpos, self.lwp)
         dist_to_check = self.dist(self.agpos, to_check)
 
@@ -825,16 +831,15 @@ class PathFollower(gym.Env):
         """Switch last and next waypoint if agent crossed
         a waypoint"""
 
-        new_nwp = self.get_red_wp(self.lwp_idx,plus_n=2)
+        to_check = self.get_red_wp(plus_n=2)
         # Waypoint to check is closer than the old one
         # -> switch waypoints
         self.lwp = self.nwp
-        self.nwp = new_nwp
+        self.nwp = to_check
         if self.DIR == 1:
             self.lwp_idx += 1
         elif self.DIR == -1:
             self.lwp_idx -= 1
-        print(f"Currently at WP {self.lwp_idx}/{len(self.red_path['x'])}")
 
     def get_lwp_idx(self, index: int) -> int:
         """Get a waypoint based on its index
@@ -850,14 +855,14 @@ class PathFollower(gym.Env):
         red_indices = self.red_path["idx"]
         for idx, _ in enumerate(red_indices):
             if red_indices[idx] > index:
-                return idx - 1 if self.DIR == 1 else idx
-        raise RuntimeError(
-            "End of path reached. No further indices found to process."
-        )
+                if self.DIR == 1:
+                    return idx - 1
+                elif self.DIR == -1:
+                    return idx
 
-    def get_red_wp(self,lwp_idx: int, plus_n: int = 0) -> Point:
-        """Get the x and y coordinate of the waypoint
-        behind the agent if plus_n==0.
+    def get_red_wp(self, plus_n: int = 0) -> Tuple[float, float]:
+        """Get the x and y coordinate of the waypoint 
+        behind the agent if plus_n==0. 
 
         Args:
             index (int): _description_
@@ -866,15 +871,16 @@ class PathFollower(gym.Env):
         Returns:
             Tuple[float, float]: _description_
         """
-
+        
         if self.DIR == 1:
-            x = self.red_path["x"][lwp_idx + plus_n]
-            y = self.red_path["y"][lwp_idx + plus_n]
+            x = self.red_path["x"][self.lwp_idx + plus_n]
+            y = self.red_path["y"][self.lwp_idx + plus_n]
         elif self.DIR == -1:
-            x = self.red_path["x"][lwp_idx - plus_n]
-            y = self.red_path["y"][lwp_idx - plus_n]
-        return Point(x,y)
+            x = self.red_path["x"][self.lwp_idx - plus_n]
+            y = self.red_path["y"][self.lwp_idx - plus_n]
 
+
+        return x, y
 
     def update_position(self, u: float, v: float) -> None:
         """Transform the numerical integration result from
@@ -891,12 +897,17 @@ class PathFollower(gym.Env):
         vx = math.cos(self.aghead) * u - math.sin(self.aghead) * v
         vy = math.sin(self.aghead) * u + math.cos(self.aghead) * v
 
+        # Unpack to access values
+        agx, agy = self.agpos
+
         # Since this env is defined as x-North|y-east we need to flip coords
         vx, vy = self.swap_xy(vx, vy)
 
-        nx = float(self._agpos.x + vx)
-        ny = float(self._agpos.y + vy)
-        self.agpos = Point(nx,ny)
+        agx += vx
+        agy += vy
+
+        # Repack
+        self._agpos = float(agx), float(agy)
 
         # Update the exterior points of the vessel for plotting
         if not TRAIN_ON_TAURUS:
@@ -906,15 +917,15 @@ class PathFollower(gym.Env):
         """Set corner points of the vessel according to
         movement
         """
+
         # Rectangle of the heading transformed vessel
-        self.vessel_rect = Rectangle(
-            self.ship_anchor(),
-            width=self.vessel.B,
-            height=self.vessel.Lpp,
-            rotation_point="center",
-            angle=360-self.aghead*180/PI,
-            color="black"
-        )
+        self.vessel_rect = Rectangle(self.ship_anchor(),
+                                     width=self.vessel.B,
+                                     height=self.vessel.Lpp,
+                                     rotation_point="center",
+                                     angle=360-self.aghead*180/PI,
+                                     color="black")
+
         # Corner points of the vessel rectangle
         self.vessel_exterior_xy = self.vessel_rect.get_corners()
 
@@ -932,12 +943,12 @@ class PathFollower(gym.Env):
         self._aghead = (self._aghead + r) % TWOPI
 
     def update_movement_heading(self, u: float, v: float) -> None:
-        """Set the movement heading, defined as the vessel heading plus
+        """Set the movement heading, defined as the vessel heading plus 
         its drift angle"""
         self._movement_heading = math.atan2(v, u) + self.aghead
 
     @staticmethod
-    def swap_xy(x: float,y: float) -> Tuple[float,float]:
+    def swap_xy(x: float, y: float) -> Tuple[float, float]:
         """Swaps x and y coordinate in order to assign
         longitudinal motion to the ascending y axis
 
@@ -948,7 +959,8 @@ class PathFollower(gym.Env):
         Returns:
             Tuple[float, float]: swapped x,y coords
         """
-        return y,x
+
+        return y, x
 
     def find_river_metrics(self) -> Tuple[float,float,float]:
         """Get the mean water depth and stream velocity under the vessel:
@@ -976,7 +988,9 @@ class PathFollower(gym.Env):
         Returns:
             float: Mean water depth under vessel
         """
-        width = 10
+
+        #width = 20
+        width = 2
 
         start_idx = self.path["idx"][self.red_path["idx"][self.lwp_idx]]
         search_range = np.arange(start_idx-width, start_idx+width+1)
@@ -995,10 +1009,10 @@ class PathFollower(gym.Env):
 
         for idx, point in enumerate(ptc):
             for col in search_range:
-                for colidx in range(N_GRIDPOINTS):
+                for colidx in range(self.GRIDPOINTS):
                     x = self.rx[col][colidx]
                     y = self.ry[col][colidx]
-                    dtp = d(Point(x, y), Point(*point))
+                    dtp = d((x, y), point)
                     if dtp < dist[idx]:
                         dist[idx] = dtp
                         col_idx[idx] = col, colidx
@@ -1009,9 +1023,6 @@ class PathFollower(gym.Env):
         str_dirx = [self.str_dirx[col][idx] for col, idx in col_idx]
         str_diry = [self.str_diry[col][idx] for col, idx in col_idx]
         str_dir = np.arctan2(str_diry, str_dirx)
-
-        # Mean index of the current crosssection the vessel passes through
-        self.current_crosssection = np.sum(col_idx[0])//len(ptc)
 
         self._wd = np.mean(wd)
         self._strvel = np.mean(str_vel)
@@ -1029,11 +1040,13 @@ class PathFollower(gym.Env):
             np.ndarray: smoothed array
         """
         s = np.zeros_like(x)
+
         for idx, x_val in enumerate(x):
             if idx == 0:
                 s[idx] = x[idx]
             else:
                 s[idx] = alpha * x_val + (1-alpha) * s[idx-1]
+
         return s
 
     def render(self, mode: str = "human") -> None:
@@ -1046,65 +1059,48 @@ class PathFollower(gym.Env):
                 plt.subplots_adjust(left=0.05,right=0.95,top=0.95,bottom=0.05)
 
             self.ax.clear()
-            if WITHFRAMES:
-                self.ax.contourf(
-                    self.rx_frame, self.ry_frame,
-                    self._wdarray_frame, cmap=cm.ocean
-                )
-                self.ax.quiver(
-                    self.rx_frame[::2, ::2], self.ry_frame[::2, ::2],
-                    self.str_diry_frame[::2,::2], self.str_dirx_frame[::2, ::2],
-                    scale=200,
-                    headwidth=2
-                )
-            else:
-                self.ax.contourf(
-                    self.rx, self.ry,
-                    self._wdarray, cmap=cm.ocean,
-                    levels = np.linspace(np.min(self._wdarray),np.max(self._wdarray),30)
-                )
-                self.ax.quiver(
-                    self.rx, self.ry,
-                    self.str_diry, self.str_dirx,
-                    scale=100, headwidth=2
-                )
-            self.ax.plot(
-                self.red_path["x"], self.red_path["y"],
+            # self.ax.contourf(self.rx_frame, self.ry_frame,
+            #                  self.wd_frame, cmap=cm.ocean)
+            # self.ax.quiver(self.rx_frame[::2, ::2], self.ry_frame[::2, ::2],
+            #                self.str_diry_frame[::2,
+            #                                    ::2], self.str_dirx_frame[::2, ::2],
+            #                scale=200, headwidth=2)
+            self.ax.contourf(self.rx, self.ry,
+                             self._wdarray, cmap=cm.ocean, 
+                             levels = np.linspace(np.min(self._wdarray),np.max(self._wdarray),30))
+            self.ax.quiver(self.rx, self.ry,
+                           self.str_diry, self.str_dirx,
+                           scale=100, headwidth=2)
+            self.ax.plot(self.red_path["x"], self.red_path["y"],
                 color="red",
-                marker=None
-            )
-            self.ax.plot(
-                self.port_border["x"],
-                self.port_border["y"], color="white"
-            )
-            self.ax.plot(
-                self.star_border["x"],
-                self.star_border["y"], color="white"
-            )
+                marker=None)
+            # self.ax.plot(*self.agpos, color="yellow", marker="o", lw=15)
+            self.ax.plot(self.port_border["x"],
+                         self.port_border["y"], color="white")
+            self.ax.plot(self.star_border["x"],
+                         self.star_border["y"], color="white")
+
+            # self.ax.arrow(
+            #     *self.draw_heading(self.aghead, len=100),
+            #     color="yellow", width=5,
+            #     label=f"Vessel Heading: {round(float(self.aghead)*180/PI,2)}°")
             self.ax.arrow(
                 *self.draw_heading(self.desired_course),
                 color="green", width=5,
-                label=f"Desired Heading: {round(float(self.desired_course)*180/PI,2)}°"
-            )
+                label=f"Desired Heading: {round(float(self.desired_course)*180/PI,2)}°")
             self.ax.arrow(
                 *self.draw_heading(self.movement_heading),
                 color="orange", width=5,
-                label=f"Movement Heading: {round(float(self.movement_heading)*180/PI,2)}°"
-            )
+                label=f"Movement Heading: {round(float(self.movement_heading)*180/PI,2)}°")
 
             self.ax.add_patch(self.vessel_rect)
 
             handles, _ = self.ax.get_legend_handles_labels()
-
             speed_count = Patch(
-                color="white",
-                label=f"Vessel Speed: {round(self.speed,2)} m/s"
-            )
+                color="white", label=f"Vessel Speed: {round(self.speed,2)} m/s")
             wuk = round(self.wd - self.vessel.d, 2)
             wd_below_keel = Patch(
-                color="white",
-                label=f"Water under Keel: {wuk} m"
-            )
+                color="white", label=f"Water under Keel: {wuk} m")
             cta = np.round(((self.strdir + PI)%(TWOPI))*180/PI, 2)
             cta_patch = Patch(
                 color="white", label=f"Current Attack Angle: {cta}°")
@@ -1115,7 +1111,7 @@ class PathFollower(gym.Env):
             fl_vel = round(float(self.strvel), 2)
             fl_vel_patch = Patch(
                 color="white", label=f"Current velocity: {fl_vel} m/s")
-
+            
             handles.append(speed_count)
             handles.append(wd_below_keel)
             handles.append(cta_patch)
@@ -1126,19 +1122,139 @@ class PathFollower(gym.Env):
 
             #zoom = 800
             zoom = 600
-            self.ax.set_xlim(
-                self.agpos.x - zoom * 1.6,
-                self.agpos.x + zoom * 1.6
-            )
-            self.ax.set_ylim(
-                self.agpos.y - zoom,
-                self.agpos.y + zoom
-            )
+            self.ax.set_xlim(self.agpos[0] - zoom *
+                              1.6, self.agpos[0] + zoom*1.6)
+            #self.ax.set_xlim(self.agpos[0] - zoom, self.agpos[0] + zoom)
+            self.ax.set_ylim(self.agpos[1] - zoom, self.agpos[1] + zoom)
+
+            #plt.axis("equal")
             plt.pause(0.001)
 
         else:
             raise NotImplementedError(
                 "Currently no other mode than 'human' is available.")
+
+    def img_from_state(self) -> None:
+
+        max_brightness = 255
+        mh = self.movement_heading
+
+        fig = Figure(figsize=(3, 3), dpi=40, layout="tight")
+        fig.patch.set_facecolor("#000000")
+        width, height = fig.get_size_inches() * fig.get_dpi()
+        canvas = FigureCanvas(fig)
+        ax: plt.Axes = fig.gca()
+
+        # Base orientation of plot
+        base = ax.transData
+        # Rotational transform object
+        rot = transforms.Affine2D().rotate(mh)
+
+        # Man rotation of agent pos to use it for zooming
+        agx = self.agpos[0]*math.cos(mh)-self.agpos[1]*math.sin(mh)
+        agy = self.agpos[0]*math.sin(mh)+self.agpos[1]*math.cos(mh)
+
+        zoom = 1000
+
+        def path():
+            ax.clear()
+            ax.set_xlim(agx - zoom, agx + zoom)
+            ax.set_ylim(agy - zoom/50, agy + zoom)
+            ax.margins(-.05, -.05)
+            ax.axis('off')
+            ax.plot(agx, agy, c="w", marker=".", lw=1)
+            ax.plot(*self.path_frame, lw=2, c="w", transform=rot+base)
+            canvas.draw()
+            raw = np.frombuffer(canvas.tostring_rgb(), dtype="uint8")
+            return raw.reshape(int(height), int(width), 3)
+
+        def water_depth():
+            ax.clear()
+            ax.set_xlim(agx - zoom, agx + zoom)
+            ax.set_ylim(agy - zoom/50, agy + zoom)
+            ax.margins(-.05, -.05)
+            ax.axis('off')
+            ax.plot(agx, agy, c="w", marker=".", lw=1)
+            ax.contourf(
+                self.rx_frame,
+                self.ry_frame,
+                self.wd_frame,
+                cmap=cm.Greys_r,
+                transform=rot+base)
+            canvas.draw()
+            raw = np.frombuffer(canvas.tostring_rgb(), dtype="uint8")
+            return raw.reshape(int(height), int(width), 3)
+
+        def str_vel():
+            ax.clear()
+            ax.set_xlim(agx - zoom, agx + zoom)
+            ax.set_ylim(agy - zoom/50, agy + zoom)
+            ax.margins(-.05, -.05)
+            ax.axis('off')
+            ax.plot(agx, agy, c="w", marker=".", lw=1)
+            ax.contourf(
+                self.rx_frame,
+                self.ry_frame,
+                self.str_vel_frame,
+                cmap=cm.Greys_r,
+                transform=rot+base)
+            canvas.draw()
+            raw = np.frombuffer(canvas.tostring_rgb(), dtype="uint8")
+            return raw.reshape(int(height), int(width), 3)
+
+        p = path()[:, :, 0]
+        wd = water_depth()[:, :, 0]
+        vel = str_vel()[:, :, 0]
+
+        return np.array([p, wd, vel]) / max_brightness
+
+    def img(self) -> np.ndarray:
+
+        fig = Figure(figsize=(3, 3), dpi=40, layout="tight")
+        # ax = fig.add_subplot(1, 1, 1)
+        fig.patch.set_facecolor("#000000")
+        width, height = fig.get_size_inches() * fig.get_dpi()
+        canvas = FigureCanvas(fig)
+        ax = fig.gca()
+        ax.axis('off')
+
+        # Base orientation of plot
+        base = ax.transData
+        # Rotational transform object
+        rot = transforms.Affine2D().rotate_deg(self.movement_heading*180/PI)
+        # ax.plot(*self.path_frame,c="w",lw=2,transform=rot+base)
+        # ax.plot(*self.star_border_frame,c="r",lw=1,transform=rot+base)
+        # ax.plot(*self.port_border_frame,c="r",lw=1,transform=rot+base)
+        ax.contourf(self.rx_frame, self.ry_frame, self.wd_frame,
+                    cmap=cm.Greys_r, transform=rot+base)
+        # Man rotation of agent pos to use it for zooming
+        agx = self.agpos[0]*math.cos(self.movement_heading) - \
+            self.agpos[1]*math.sin(self.movement_heading)
+        agy = self.agpos[0]*math.sin(self.movement_heading) + \
+            self.agpos[1]*math.cos(self.movement_heading)
+        # ax.plot(agx,agy, color="w", marker=".", lw=2)
+        zoom = 1000
+        ax.set_xlim(agx - zoom, agx + zoom)
+        ax.set_ylim(agy - zoom/50, agy + zoom)
+        ax.margins(-.05, -.05)
+
+        canvas.draw()
+        img = np.frombuffer(canvas.tostring_rgb(), dtype="uint8").reshape(
+            int(height), int(width), 3)
+        img = img.copy()
+        img = -img[:, :, 0] + 255  # invert colors
+        return img
+
+    def plot_img(self, img: np.ndarray) -> None:
+
+        if not plt.get_fignums():
+            self.fig = plt.figure()
+            self.ax = self.fig.add_subplot(1, 1, 1)
+
+        self.ax.clear()
+        self.ax.imshow(img, cmap=cm.gray_r)
+
+        plt.pause(0.01)
 
     def construct_frames(self) -> None:
         """Construct frames of every metric
@@ -1175,12 +1291,13 @@ class PathFollower(gym.Env):
                         obj["x"][wp-la:wp+lb],
                         obj["y"][wp-la:wp+lb])
 
+
         self.path_frame = make(
             obj=self.path,
             la=self.lookahead,
             lb=self.lookbehind
         )
-        self._wdarray_frame = make(
+        self.wd_frame = make(
             obj=self._wdarray - self.vessel.d,
             la=self.lookahead,
             lb=self.lookbehind
@@ -1236,13 +1353,16 @@ class PathFollower(gym.Env):
             len (int, optional): _description_. Defaults to 200.
 
         Returns:
-            Tuple[float, float, float, float]: x and y coordinates of base and tip
+            Tuple[float, float, float, float]: x and y coordinates of base and tip 
             of arrow respectively
         """
-        a = self.agpos
+
+        x, y = self.agpos
+
         endx = len * math.sin(angle)
         endy = len * math.cos(angle)
-        return float(a.x), float(a.y), endx, endy
+
+        return float(x), float(y), endx, endy
 
     def ship_anchor(self) -> Tuple:
         """Build a coordinate tuple resembling the
@@ -1260,31 +1380,34 @@ class PathFollower(gym.Env):
             Tuple: coordinates of the anchor
         """
 
-        ap = self.agpos
+        agx, agy = self.agpos
+
         # Length and Breadth of the simulated vessel
         L, B = self.vessel.Lpp, self.vessel.B
-        anchor = ap.x - B/2, ap.y - L/2
-        return anchor
 
+        anchor = agx - B/2, agy - L/2
+
+        return anchor
+    
     # PID controller functions ------------------------------------------
 
     def get_pid_command(self) -> float:
 
         e = -self.heading_error
-        #e = -np.tanh(self.cte)
-        self.integator_sum += e # Integrate error
 
+        self.integator_sum += e # Integrate error
+        
         # PID command
         comm =  self.K_p*e + self.K_d*self.r_lt + self.K_i*self.integator_sum
-        if abs(comm) > self.RUDDER_INCR:
-            comm = self.RUDDER_INCR * np.sign(comm)
+        
         self._cra = comm
 
         # Calculate commanded rudder angle
         if self._cra < 0.0:
-            self._cra = max(self.delta+comm,-self.MAX_RUDDER)
+            self._cra = max(comm,-self.MAX_RUDDER)
         else:
-            self._cra = min(self.delta+comm,self.MAX_RUDDER)
+            self._cra = min(comm,self.MAX_RUDDER)
+
         return self.cra
 
     def pid_step(self):
@@ -1304,6 +1427,8 @@ class PathFollower(gym.Env):
                 delta=self.delta,
                 fl_psi=(self.strdir + PI) % (TWOPI),
                 water_depth=self.wd,
+                #water_depth=None,
+                # fl_vel=None,
                 fl_vel=self.strvel,
                 atol=1e-6,
                 rtol=1e-3,
@@ -1324,7 +1449,7 @@ class PathFollower(gym.Env):
         self.speed = math.sqrt(u**2+v**2)
 
         # Store old heading_error in [deg]
-        self.r_lt = -r
+        self.r_lt = r
 
         # Update state
         self.update_vessel_heading(r)
@@ -1350,53 +1475,47 @@ class PathFollower(gym.Env):
         self.history.append(self.reward,"reward")
 
         # Set initial values to the result of the last iteration
+        print(sol)
         self.ivs.u, self.ivs.v, self.ivs.r = np.hstack(sol)
 
         #print(np.round(self.cra*180/PI,2),np.round(self.delta*180/PI,2))
-        return
-
+        return 
+    
     # Dynamic setter for extracted river data ----------------------------
 
-    def set_arrs(self, coords: np.ndarray, metrics: np.ndarray) -> None:
+    def set_arrs(self, coords: ArrayLike, metrics: ArrayLike) -> None:
         """Set the arrays of coordinates and metrics.
 
         Args:
             coords (ArrayLike): array of coordinates
             metrics (ArrayLike): array of metrics
         """
-        # Since our generated river can have variable width
-        # I implement a switch here.
-
         # River X coordinate
-        self.rx = np.array([row[0] for row in coords])
-        self.rx = self.rx.reshape((-1, N_GRIDPOINTS))
+        self.rx = np.array([coords[row][0] for row, _ in enumerate(coords)])
+        self.rx = self.rx.reshape((-1, self.GRIDPOINTS))
 
         # River Y coordinate
-        self.ry = np.array([row[1] for row in coords])
-        self.ry = self.ry.reshape((-1, N_GRIDPOINTS))
+        self.ry = np.array([coords[row][1] for row, _ in enumerate(coords)])
+        self.ry = self.ry.reshape((-1, self.GRIDPOINTS))
 
         # Extract water depth and reshape
         if TRAIN:
-            self._wdarray = np.array([row[3] for row  in metrics])
+            self._wdarray = np.array([metrics[row][3] for row, _ in enumerate(metrics)])
         else:
-            self._wdarray = np.array([math.sqrt(row[3]) for row in metrics])
+            self._wdarray = np.array([math.sqrt(metrics[row][3]) for row, _ in enumerate(metrics)])
             self._wdarray = self._wdarray + 4
-        self._wdarray = self._wdarray.reshape((-1, N_GRIDPOINTS))
+        self._wdarray = self._wdarray.reshape((-1, self.GRIDPOINTS))
 
         # Stream direction
-        self.str_diry = np.array([row[1] for row in metrics])
+        self.str_diry = np.array([metrics[row][1] for row, _ in enumerate(metrics)])
+        self.str_diry = self.str_diry.reshape((-1, self.GRIDPOINTS))
 
-        self.str_dirx = np.array([row[2] for row in metrics])
+        self.str_dirx = np.array([metrics[row][2] for row, _ in enumerate(metrics)])
+        self.str_dirx = self.str_dirx.reshape((-1, self.GRIDPOINTS))
 
         # Extract stream velocity and reshape
-        try:
-            self._strvelarray = np.array([row[6]for row  in metrics])
-        except:
-            self._strvelarray = np.sqrt(self.str_dirx**2+self.str_diry**2)
-        self._strvelarray = self._strvelarray.reshape((-1, N_GRIDPOINTS))
-
-        self.str_dirx = self.str_dirx.reshape((-1, N_GRIDPOINTS))
-        self.str_diry = self.str_diry.reshape((-1, N_GRIDPOINTS))
+        self._strvelarray = np.array([metrics[row][6]for row, _ in enumerate(metrics)])
+        self._strvelarray = self._strvelarray.reshape((-1, self.GRIDPOINTS))
 
 
 # Additional helper functions and classes -------------------------------
@@ -1420,13 +1539,15 @@ def import_river(path: str) -> Tuple[Dict[str, list], Dict[str, list]]:
         path += "/"
 
     for file in ["coords", "metrics"]:
-        with open(f"{path}{file}.txt", "r") as f:
-            reader = csv.reader(f, delimiter=" ")
-            data[file] = list(reader)
+        with open(path + file + ".txt", "r") as f:
+            reader = csv.reader(f, delimiter=' ')
+            for row in reader:
+                tmp = [float(entry) for entry in row]
+                data[file].append(tmp)
 
-    return np.array(data["coords"],dtype=float), np.array(data["metrics"],dtype=float)
+    return np.array(data["coords"]), np.array(data["metrics"])
 
-def random_river(nsegments: int, var: float, vel: float) -> os.PathLike:
+def random_river(nsegments: int, var: float, vel: float) -> Tuple[Dict[str, list], Dict[str, list]]:
     """Generate a random river with nsegments from the rivergen package.
 
     Args:
@@ -1441,8 +1562,8 @@ def delete_river(path: str) -> None:
     Args:
         path (str): path to the river file
     """
-    abspath  = abspath(path)
-    shutil.rmtree(abspath) if isdir(abspath) else None
+    abspath  = os.path.abspath(path)
+    shutil.rmtree(abspath) if os.path.isdir(abspath) else None
 
 def to_rad(ang: float) -> float:
     """Convert from degrees to radians"""
@@ -1452,84 +1573,9 @@ def to_deg(ang: float) -> float:
     """Convert from radians to degrees"""
     return ang*180/PI
 
-@dataclass
-class Particle:
-    pos: np.ndarray
-    velocity: np.ndarray
-    best_pos: np.ndarray
-    score: float
-
-def _eval(pf: PathFollower,p:Particle):
-    pf.K_p = p.pos[0]
-    pf.K_d = p.pos[1]
-    pf.K_i = p.pos[2]
-    err = 0
-    pf.reset()
-    for _ in range(500):
-        pf.pid_step()
-        err += abs(pf.heading_error)
-        err += pf.heading_error if pf.heading_error > 0 else 0
-    return float(err)
-
-def _clip_velocity(actual: float, target: float):
-    if abs(actual) > target:
-        return target * np.sign(actual)
-    else: return actual
-
-def PSO(pf: PathFollower) -> List[float]:
-
-    n_particles = 20
-    maxvel = [0.5,1,0.05]
-
-    particles = []
-    for _ in range(n_particles):
-        _pos = np.array([
-            np.random.uniform(0.25,3.75), # K_p
-            np.random.uniform(10,30), # K_d
-            np.random.uniform(0.025,0.075) # K_i
-        ])
-        _vel = np.array([0.05,1,0.005])
-        _best = _pos
-        particles.append(Particle(pos=_pos,velocity=_vel,best_pos=_best,score=np.inf))
-
-    ITERS = 1000
-    p_best = None
-    score_best = np.inf
-    for iter in range(ITERS):
-
-        omega = np.random.uniform(0.5,1)
-        with Pool() as p:
-            res = p.starmap(_eval,[(pf,particle) for particle in particles])
-
-        for idx, particle in enumerate(particles):
-            particle: Particle
-            if res[idx] < particle.score:
-                particle.score = res[idx]
-                particle.best_pos = particle.pos
-
-        best_idx = np.argmin(res)
-        if res[best_idx] < score_best:
-            score_best = res[best_idx]
-            p_best = particles[best_idx].pos
-        print(f"{p_best} at Iteration {iter}. Score_best: {score_best:.2f}")
-
-        u = np.random.uniform(0,2)
-
-        for pa in particles:
-            pa: Particle
-            pa.velocity = omega*pa.velocity + u*(pa.best_pos-pa.pos)+u*(p_best-pa.pos)
-            pa.velocity = np.array([_clip_velocity(vel,tgt) for vel,tgt in zip(pa.velocity,maxvel)])
-            pa.pos += pa.velocity
-            pa.pos = np.clip(pa.pos,0,None)
-
-    return p_best
-
 class History:
-    """Logging object for storing
+    """Logging object for storing 
     relevant environment information"""
-
-    pos: Sequence[Point]
-    path: Dict[str,np.ndarray]
 
     u: Sequence[Surge]
     v: Sequence[Sway]
@@ -1542,6 +1588,9 @@ class History:
     cross_curr_angle: Sequence[float]
     timestep: Sequence[int]
     reward: Sequence[float]
+
+    def __init__(self) -> None:
+        pass
 
     def __repr__(self) -> str:
         print("\n".join(f"{key}: {type(val)}" for key,
@@ -1563,12 +1612,8 @@ class History:
                 f"but {type(item)} was found"
                 )
 
-    def save_path(self,pf: PathFollower) -> None:
-        setattr(self,"path",[(x,y) for x,y in zip(pf.red_path["x"],pf.red_path["y"])])
-
     def log(self, pf: PathFollower, action: int) -> None:
-
-        self.append(pf.agpos,"pos")
+        
         self.append(pf.ivs.u,"u")
         self.append(pf.ivs.v,"v")
         self.append(pf.ivs.r,"r")
@@ -1589,53 +1634,29 @@ if __name__ == "__main__":
     matplotlib.rcParams['xtick.color'] = COLOR
     matplotlib.rcParams['ytick.color'] = COLOR
 
-    #pf = PathFollower(direction=1)
-    #PSO(pf)
-
-
-    pf = PathFollower(direction=1)
-    s = pf.reset()
-    for i in range(500000):
-        try:
-            print(f"Iteration {i}",end="\r")
-            pf.pid_step()
-            if pf.lwp_idx == len(pf.red_path['x']):
-                break
-        except:
-            break
-        #pf.render()
-
-
-    # with open("trajectory_plots/star_border", "w") as file:
-    #         file.write(json.dumps([list(pf.star_border["x"]),list(pf.star_border["y"])]))
-
-    # with open("trajectory_plots/port_border", "w") as file:
-    #         file.write(json.dumps([list(pf.port_border["x"]),list(pf.port_border["y"])]))
-
-    SAVE = True
+    p = PathFollower(direction=1)
+    s = p.reset()
+    for i in range(1000):
+        p.pid_step()
+        p.render()
+        
+    SAVE = False
     if SAVE:
         path = "trajectory_plots/"
-        path = "/home/niklaspaulig/Dropbox/TU Dresden/writing/Autonomous Navigation on Rivers using Deep Reinforcement Learning/data/entire_river/5rps/downstream/pid/lr/"
         with open(path + "cte", "w") as file:
-            file.write(json.dumps(list(pf.history.cte)))
+            file.write(json.dumps(list(p.history.cte)))
 
         with open(path + "heading_error", "w") as file:
-            file.write(json.dumps(list(pf.history.heading_error)))
+            file.write(json.dumps(list(p.history.heading_error)))
 
         with open(path + "rudder_movement", "w") as file:
-            file.write(json.dumps(list(pf.history.delta)))
+            file.write(json.dumps(list(p.history.delta)))
 
         with open(path + "cross_curr", "w") as file:
-            file.write(json.dumps(list(pf.history.cross_curr_angle)))
+            file.write(json.dumps(list(p.history.cross_curr_angle)))
 
         with open(path + "yaw_accel", "w") as file:
-            file.write(json.dumps(list(pf.history.r)))
+            file.write(json.dumps(list(p.history.r)))
 
         with open(path + "reward", "w") as file:
-            file.write(json.dumps(list(pf.history.reward)))
-
-        with open(path + "pos", "w") as file:
-            file.write(json.dumps([[pos.x,pos.y] for pos in pf.history.pos]))
-
-        with open(path + "path", "w") as file:
-            file.write(json.dumps(list(pf.history.path)))
+            file.write(json.dumps(list(p.history.reward)))

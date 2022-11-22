@@ -3,8 +3,6 @@ import random
 import time
 
 import gym
-import gym_minatar
-import gym_pygame
 import numpy as np
 import torch
 import tud_rl.agents.continuous as agents
@@ -12,7 +10,7 @@ from tud_rl.agents.base import _Agent
 from tud_rl.common.configparser import ConfigFile
 from tud_rl.common.logging_func import EpochLogger
 from tud_rl.common.logging_plot import plot_from_progress
-from tud_rl.wrappers import get_wrapper
+from tud_rl.envs import make_env
 
 
 def evaluate_policy(test_env: gym.Env, agent: _Agent, c: ConfigFile):
@@ -93,14 +91,10 @@ def train(c: ConfigFile, agent_name: str):
     start_time = time.time()
 
     # init envs
-    env: gym.Env = gym.make(c.Env.name, **c.Env.env_kwargs)
-    test_env: gym.Env = gym.make(c.Env.name, **c.Env.env_kwargs)
 
-    # wrappers
-    for wrapper in c.Env.wrappers:
-        wrapper_kwargs = c.Env.wrapper_kwargs[wrapper]
-        env: gym.Env = get_wrapper(name=wrapper, env=env, **wrapper_kwargs)
-        test_env: gym.Env = get_wrapper(name=wrapper, env=test_env, **wrapper_kwargs)
+    assert hasattr(c.Env,"path"), "Please provide a path to your env location."
+    env = make_env(c.Env.name,c.Env.path, **c.Env.env_kwargs)
+    test_env = make_env(c.Env.name,c.Env.path, **c.Env.env_kwargs)
 
     # get state_shape
     if c.Env.state_type == "image":

@@ -1,20 +1,16 @@
-import csv
 import pickle
 import random
 import time
 
 import gym
 import numpy as np
-import pandas as pd
 import torch
-import tud_rl.agents.discrete as agents
+import tud_rl.agents.continuous as agents
 from tud_rl.agents.base import _Agent
 from tud_rl.common.configparser import ConfigFile
 from tud_rl.common.logging_func import EpochLogger
 from tud_rl.common.logging_plot import plot_from_progress
 from tud_rl.wrappers import get_wrapper
-from tud_rl.envs import make_env
-from tud_rl import logger
 
 
 def evaluate_policy(test_env: gym.Env, agent: _Agent, c: ConfigFile):
@@ -29,7 +25,7 @@ def evaluate_policy(test_env: gym.Env, agent: _Agent, c: ConfigFile):
         # LSTM: init history
         if "LSTM" in agent.name:
             s_hist = np.zeros((agent.history_length, agent.state_shape))
-            a_hist = np.zeros((agent.history_length, 1), dtype=np.int64)
+            a_hist = np.zeros((agent.history_length, agent.num_actions))
             hist_len = 0
 
         # get initial state
@@ -95,9 +91,8 @@ def train(c: ConfigFile, agent_name: str):
     start_time = time.time()
 
     # init envs
-    assert hasattr(c.Env,"path"), "Please provide a path to your env location."
-    env = make_env(c.Env.name,c.Env.path, **c.Env.env_kwargs)
-    test_env = make_env(c.Env.name,c.Env.path, **c.Env.env_kwargs)
+    env: gym.Env = gym.make(c.Env.name, **c.Env.env_kwargs)
+    test_env: gym.Env = gym.make(c.Env.name, **c.Env.env_kwargs)
 
     # wrappers
     for wrapper in c.Env.wrappers:
@@ -107,18 +102,16 @@ def train(c: ConfigFile, agent_name: str):
 
     # get state_shape
     if c.Env.state_type == "image":
-        if "MinAtar" in c.Env.name:
-            # careful, MinAtar constructs state as (height, width, in_channels), which is NOT aligned with PyTorch
-            c.state_shape = (env.observation_space.shape[2], *env.observation_space.shape[0:2])
-        else:
-            c.state_shape = env.observation_space.shape[0]
+        raise NotImplementedError("Currently, image input is not available for continuous action spaces.")
 
     elif c.Env.state_type == "feature":
         c.state_shape = env.observation_space.shape[0]
 
-    # mode and num actions
+    # Action details
     c.mode = "train"
-    c.num_actions = env.action_space.n
+    c.num_actions = env.action_space.shape[0]
+    c.action_high = env.action_space.high[0]
+    c.action_low  = env.action_space.low[0]
 
     # seeding
     env.seed(c.seed)
@@ -138,18 +131,17 @@ def train(c: ConfigFile, agent_name: str):
 
     # Initialize logging
     agent.logger = EpochLogger(alg_str    = agent.name,
-                               seed       = c.seed,
                                env_str    = c.Env.name,
                                info       = c.Env.info,
                                output_dir = c.output_dir if hasattr(c, "output_dir") else None)
 
     agent.logger.save_config({"agent_name": agent.name, **c.config_dict})
-    agent.print_params(agent.n_params, case=0)
+    agent.print_params(agent.n_params, case=1)
 
     # LSTM: init history
     if "LSTM" in agent.name:
         s_hist = np.zeros((agent.history_length, agent.state_shape))
-        a_hist = np.zeros((agent.history_length, 1), dtype=np.int64)
+        a_hist = np.zeros((agent.history_length, agent.num_actions))
         hist_len = 0
 
     # get initial state and normalize it
@@ -168,7 +160,7 @@ def train(c: ConfigFile, agent_name: str):
 
         # select action
         if total_steps < c.act_start_step:
-            a = np.random.randint(low=0, high=agent.num_actions, size=1, dtype=int).item()
+            a = np.random.uniform(low=agent.action_low, high=agent.action_high, size=agent.num_actions)
         else:
             if "LSTM" in agent.name:
                 a = agent.select_action(s=s, s_hist=s_hist, a_hist=a_hist, hist_len=hist_len)
@@ -215,14 +207,14 @@ def train(c: ConfigFile, agent_name: str):
         # end of episode handling
         if d or (epi_steps == c.Env.max_episode_steps):
 
-            # reset active head for BootDQN
-            if "Boot" in agent_name:
-                agent.reset_active_head()
+            # reset noise after episode
+            if hasattr(agent, "noise"):
+                agent.noise.reset()
 
             # LSTM: reset history
             if "LSTM" in agent.name:
                 s_hist = np.zeros((agent.history_length, agent.state_shape))
-                a_hist = np.zeros((agent.history_length, 1), dtype=np.int64)
+                a_hist = np.zeros((agent.history_length, agent.num_actions))
                 hist_len = 0
 
             # reset to initial state and normalize it
@@ -254,7 +246,15 @@ def train(c: ConfigFile, agent_name: str):
             agent.logger.log_tabular("Epi_Ret", with_min_and_max=True)
             agent.logger.log_tabular("Eval_ret", with_min_and_max=True)
             agent.logger.log_tabular("Q_val", with_min_and_max=True)
-            agent.logger.log_tabular("Loss", average_only=True)
+            agent.logger.log_tabular("Critic_loss", average_only=True)
+            agent.logger.log_tabular("Actor_loss", average_only=True)
+
+            if "LSTM" in agent.name:
+                agent.logger.log_tabular("Actor_CurFE", with_min_and_max=False)
+                agent.logger.log_tabular("Actor_ExtMemory", with_min_and_max=False)
+                agent.logger.log_tabular("Critic_CurFE", with_min_and_max=False)
+                agent.logger.log_tabular("Critic_ExtMemory", with_min_and_max=False)
+
             agent.logger.dump_tabular()
 
             # create evaluation plot based on current 'progress.txt'
@@ -262,65 +262,23 @@ def train(c: ConfigFile, agent_name: str):
                                alg     = agent.name,
                                env_str = c.Env.name,
                                info    = c.Env.info)
+
             # save weights
-            save_weights(agent, eval_ret)
+            torch.save(agent.actor.state_dict(), f"{agent.logger.output_dir}/{agent.name}_actor_weights.pth")
+            torch.save(agent.critic.state_dict(), f"{agent.logger.output_dir}/{agent.name}_critic_weights.pth")
 
             # save input normalizer values
             if c.input_norm:
                 with open(f"{agent.logger.output_dir}/{agent.name}_inp_norm_values.pickle", "wb") as f:
                     pickle.dump(agent.inp_normalizer.get_for_save(), f)
 
+def save_weights(agent: _Agent) -> None:
 
-def save_weights(agent: _Agent, eval_ret) -> None:
-
-    # check whether this was the best evaluation epoch so far
-    with open(f"{agent.logger.output_dir}/progress.txt") as f:
-        reader = csv.reader(f, delimiter="\t")
-        d = list(reader)
-
-    df = pd.DataFrame(d)
-    df.columns = df.iloc[0]
-    df = df.iloc[1:]
-    df = df.astype(float)
-
-    if len(df["Avg_Eval_ret"]) == 1:
-        best_weights = True
-    else:
-        if np.mean(eval_ret) > max(df["Avg_Eval_ret"][:-1]):
-            best_weights = True
-        else:
-            best_weights = False
-
-    # Save weights for agents that require a single net
-    if not any([word in agent.name for word in ["ACCDDQN", "Ensemble", "MaxMin"]]):
-
-        torch.save(agent.DQN.state_dict(),
-                   f"{agent.logger.output_dir}/{agent.name}_weights.pth")
-
-        if best_weights:
-            torch.save(agent.DQN.state_dict(),
-                       f"{agent.logger.output_dir}/{agent.name}_best_weights.pth")
-
-    # Save both nets of the ACCDDQN
-    if "ACCDDQN" in agent.name:
-
-        torch.save(agent.DQN_A.state_dict(),
-                   f"{agent.logger.output_dir}/{agent.name}_A_weights.pth")
-        torch.save(agent.DQN_B.state_dict(),
-                   f"{agent.logger.output_dir}/{agent.name}_B_weights.pth")
-
-        if best_weights:
-            torch.save(agent.DQN_A.state_dict(),
-                        f"{agent.logger.output_dir}/{agent.name}_A_best_weights.pth")
-            torch.save(agent.DQN_B.state_dict(),
-                        f"{agent.logger.output_dir}/{agent.name}_B_best_weights.pth")
-
-    if any(w in agent.name for w in ["Ensemble", "MaxMin"]):
-        for idx, net in enumerate(agent.EnsembleDQN):
-            torch.save(net.state_dict(),
-                       f"{agent.logger.output_dir}/{agent.name}_weights_{idx}.pth")
-
-        if best_weights:
-            for idx, net in enumerate(agent.EnsembleDQN):
-                torch.save(net.state_dict(),
-                        f"{agent.logger.output_dir}/{agent.name}_best_weights_{idx}.pth")
+    torch.save(
+        agent.actor.state_dict(), 
+        f"{agent.logger.output_dir}/{agent.name}_weights.actor"
+        )
+    torch.save(
+        agent.critic.state_dict(), 
+        f"{agent.logger.output_dir}/{agent.name}_weights.critic"
+        )

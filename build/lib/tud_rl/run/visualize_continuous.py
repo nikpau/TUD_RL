@@ -9,7 +9,7 @@ import tud_rl.agents.continuous as agents
 from tud_rl.agents.base import _Agent
 from tud_rl.common.configparser import ConfigFile
 from tud_rl.configs.continuous_actions import __path__ as c_path
-from tud_rl.envs import make_env
+from tud_rl.wrappers import get_wrapper
 
 
 def visualize_policy(env: gym.Env, agent: _Agent, c: ConfigFile):
@@ -79,7 +79,12 @@ def visualize_policy(env: gym.Env, agent: _Agent, c: ConfigFile):
 
 def test(c: ConfigFile, agent_name: str):
     # init envs
-    env = make_env(c.Env.name, c.Env.path, **c.Env.env_kwargs)
+    env = gym.make(c.Env.name, **c.Env.env_kwargs)
+
+    # wrappers
+    for wrapper in c.Env.wrappers:
+        wrapper_kwargs = c.Env.wrapper_kwargs[wrapper]
+        env: gym.Env = get_wrapper(name=wrapper, env=env, **wrapper_kwargs)
 
     # get state_shape
     if c.Env.state_type == "image":
